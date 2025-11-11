@@ -31,63 +31,33 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
             return await apiCall(); // Success!
         } catch (error) {
             console.warn(`API call failed on attempt ${attempt}.`, error);
-
-            if (attempt === MAX_RETRIES) {
-                let finalErrorMessage = "Failed to call the API after multiple attempts. Please check your connection and try again later.";
-                if (error instanceof Error) {
-                    if (error.message.includes('429') || error.message.includes('quota')) {
-                        finalErrorMessage = "You have exceeded your API quota. Please wait and try again later, or check your plan and billing details.";
-                    } else if (error.message.includes('503') || error.message.includes('overloaded')) {
-                        finalErrorMessage = "The AI model is temporarily overloaded. Please try again in a few moments.";
-                    }
-                }
-                throw new Error(finalErrorMessage);
-            }
-
-            let backoffTime = 0;
-            let parsedError: any = null;
+            const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
             
-            if (error instanceof Error && error.message.includes('{')) {
-                try {
-                    // The error message from the SDK is often a JSON string.
-                    parsedError = JSON.parse(error.message);
-                } catch (e) {
-                    console.warn("Could not parse JSON from error message. Will use exponential backoff.");
-                }
+            if (attempt === MAX_RETRIES) {
+                 if (errorMessage.includes('429') || errorMessage.includes('quota')) {
+                    throw new Error("You exceeded your current quota. Please wait a minute before trying again. For higher limits, check your plan and billing details.");
+                 }
+                 if (errorMessage.includes('503') || errorMessage.includes('overloaded')) {
+                    throw new Error("The AI model is temporarily overloaded. Please try again in a few moments.");
+                 }
+                throw new Error("Failed to call the API after multiple attempts. Please check your connection and try again later.");
             }
 
-            // Check for 429 Rate Limit error specifically
-            if (parsedError && parsedError.error?.code === 429) {
-                console.log("Rate limit exceeded. Checking for API-suggested retry delay...");
-                let retryDelaySeconds = 60; // Default to 60s if not found
-
-                const details = parsedError.error.details;
-                if (details && Array.isArray(details)) {
-                    const retryInfo = details.find((d: any) => d['@type'] === 'type.googleapis.com/google.rpc.RetryInfo');
-                    if (retryInfo && retryInfo.retryDelay) {
-                        const delayStr = retryInfo.retryDelay;
-                        const seconds = parseInt(delayStr, 10);
-                        if (!isNaN(seconds)) {
-                            // Use API suggestion, add a small buffer and jitter.
-                            retryDelaySeconds = seconds + 1; 
-                            console.log(`API suggested retry after ${seconds}s. Waiting for ${retryDelaySeconds}s.`);
-                        }
-                    }
-                }
-                
-                backoffTime = (retryDelaySeconds * 1000) + (Math.random() * 1000);
+            let backoffTime;
+            
+            if (errorMessage.includes('429') || errorMessage.includes('quota')) {
+                console.log("Rate limit exceeded. Waiting for 61 seconds before retrying...");
+                backoffTime = 61000 + Math.random() * 1000;
             } else {
-                // Handle other transient errors (like 503) or parsing failures with exponential backoff
-                console.log("Transient error detected or structured error not found. Using exponential backoff...");
-                // Start with a slightly longer base delay and increase it
-                backoffTime = Math.pow(2, attempt) * 1500 + Math.random() * 1000;
+                console.log("Transient error detected. Using exponential backoff...");
+                backoffTime = Math.pow(2, attempt) * 1000 + Math.random() * 250;
             }
             
             console.log(`Waiting for ${backoffTime.toFixed(0)}ms before retrying...`);
             await delay(backoffTime);
         }
     }
-    // This part should be unreachable due to the loop condition and throw
+    // This should be unreachable
     throw new Error("API call failed after all retry attempts.");
 }
 
