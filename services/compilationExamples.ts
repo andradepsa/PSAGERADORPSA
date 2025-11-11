@@ -1,17 +1,28 @@
+import { PRELOADED_SUCCESSFUL_EXAMPLES, PRELOADED_FAILED_EXAMPLES } from './preloadedExamples';
+
 const MAX_SUCCESSFUL_EXAMPLES = 100;
 const SUCCESSFUL_KEY = 'successful_latex_compilations';
 const FAILED_KEY = 'failed_latex_compilations';
 
 function getStoredExamples(key: string): string[] {
+    let preloaded: string[] = [];
+    if (key === SUCCESSFUL_KEY) {
+        preloaded = PRELOADED_SUCCESSFUL_EXAMPLES;
+    } else if (key === FAILED_KEY) {
+        preloaded = PRELOADED_FAILED_EXAMPLES;
+    }
+
     try {
         const stored = localStorage.getItem(key);
-        if (stored) {
-            return JSON.parse(stored);
-        }
+        const localExamples = stored ? JSON.parse(stored) : [];
+        // Combine local examples with preloaded ones and remove duplicates.
+        // new Set() keeps the first occurrence, so this prioritizes local examples if duplicates exist.
+        const combined = [...localExamples, ...preloaded];
+        return [...new Set(combined)];
     } catch (e) {
         console.error(`Error reading ${key} from localStorage`, e);
+        return preloaded; // Fallback to preloaded examples if localStorage fails.
     }
-    return [];
 }
 
 /**
@@ -22,21 +33,27 @@ function getStoredExamples(key: string): string[] {
  */
 function addExample(key: string, code: string, limit: number | null) {
     try {
-        const examples = getStoredExamples(key);
-        // Avoid adding duplicates
-        if (examples.includes(code)) return;
+        const stored = localStorage.getItem(key);
+        const localExamples = stored ? JSON.parse(stored) : [];
 
-        examples.push(code);
+        // To avoid polluting localStorage with preloaded examples, we check against all known examples
+        // before adding a new one only to the local list.
+        const allKnownExamples = new Set(getStoredExamples(key));
+        if (allKnownExamples.has(code)) {
+            return;
+        }
 
-        // Only enforce the limit if it's provided and not null
+        localExamples.push(code);
+
         if (limit !== null) {
-            while (examples.length > limit) {
-                examples.shift(); // FIFO
+            while (localExamples.length > limit) {
+                localExamples.shift(); // FIFO
             }
         }
         
-        localStorage.setItem(key, JSON.stringify(examples));
-    } catch (e) {
+        localStorage.setItem(key, JSON.stringify(localExamples));
+    } catch (e)
+        {
         console.error(`Error writing to ${key} in localStorage`, e);
     }
 }
