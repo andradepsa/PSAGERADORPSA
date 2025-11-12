@@ -2,6 +2,7 @@ import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Language, AnalysisResult, PaperSource, StyleGuide } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES } from '../constants';
 import { getCompilationExamplesForPrompt } from './compilationExamples';
+import { ARTICLE_TEMPLATE } from './articleTemplate'; // Import the single article template
 
 // Removed the global 'ai' instance. It will now be created on-demand.
 
@@ -194,84 +195,36 @@ export async function generateInitialPaper(title: string, language: Language, pa
     else if (pageCount === 60) referenceCount = 60;
     else if (pageCount === 100) referenceCount = 100;
 
-    const examples = getCompilationExamplesForPrompt();
-    const examplesPrompt = formatExamplesForPrompt(examples);
+    const systemInstruction = `You are a world-class AI assistant specialized in generating high-quality, well-structured scientific papers in LaTeX format. Your task is to write a complete, coherent, and academically rigorous paper based on a provided title, strictly following a given LaTeX template.
 
-    const systemInstruction = `You are a world-class AI assistant specialized in generating high-quality, well-structured scientific papers in LaTeX format. Your task is to write a complete, coherent, and academically rigorous paper based on the provided title.
+**Execution Rules:**
+1.  **Use the Provided Template:** You will be given a LaTeX template with placeholders like [INSERT ... HERE]. Your entire output MUST be the complete LaTeX document after filling in these placeholders with new, relevant content.
+2.  **Fill All Placeholders:** You must replace all placeholders with content appropriate for the new paper's title.
+    -   \`[INSERT NEW TITLE HERE]\`: Replace with the new title.
+    -   \`[INSERT NEW COMPLETE ABSTRACT HERE]\`: Write a new abstract for the paper. This same abstract must be used in both the \`\\hypersetup{pdfsubject={...}}\` block and the \`\\begin{abstract}\` environment. The abstract text itself must not contain any LaTeX commands.
+    -   \`[INSERT COMMA-SEPARATED KEYWORDS HERE]\`: Provide new keywords relevant to the title.
+    -   \`[INSERT NEW CONTENT FOR ... SECTION HERE]\`: Write substantial, high-quality academic content for each section (Introduction, Literature Review, etc.) to generate a paper of approximately **${pageCount} pages**.
+    -   \`[INSERT NEW REFERENCE LIST HERE]\`: Generate a new list of exactly **${referenceCount}** academic references relevant to the title. Use Google Search grounding for this. Format each reference as a plain paragraph, for example, starting with \`\\noindent\` and ending with \`\\par\`. Do NOT use \`\\bibitem\` or \`thebibliography\`.
+3.  **Strictly Adhere to Structure:** Do NOT modify the LaTeX structure provided in the template. Do not add or remove packages, change the author information, or alter the section commands. The only exception is adding the correct babel package for the language.
+4.  **Language:** The entire paper must be written in **${languageName}**.
+5.  **Output Format:** The entire output MUST be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) around the LaTeX code.`;
 
-    **Output Format & Rules:**
-    1.  **Strictly LaTeX:** The entire output MUST be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex) before \`\\documentclass\` or after \`\\end{document}\`.
-    2.  **Mandatory Preamble:** The paper must begin with the following preamble, exactly as written. NO other packages, especially \`graphicx\`, are allowed.
-        \`\`\`latex
-        \\documentclass[12pt,a4paper]{article}
-        \\usepackage[utf8]{inputenc}
-        \\usepackage[T1]{fontenc}
-        \\usepackage[${babelLanguage}]{babel}
-        \\usepackage{amsmath, amssymb, geometry, setspace, url, verbatim}
-        \\usepackage{hyperref}
-        \`\`\`
-    3.  **PDF Metadata (Crucial):** Immediately after the preamble, you MUST add a \`\\hypersetup\` block to define the PDF metadata.
-        -   The \`pdfsubject\` field MUST contain the **full, complete abstract** of the paper. It must not be a single line. The abstract text itself must not contain any LaTeX commands like \`\\noindent\`.
-        -   The \`pdfkeywords\` field must contain the keywords, separated by commas.
-        -   The \`pdftitle\` must match the paper's title.
-        -   The \`pdfauthor\` MUST be exactly "SÉRGIO DE ANDRADE, PAULO".
-        
-        **Example of the required \`\\hypersetup\` block:**
-        \`\`\`latex
-        \\hypersetup{
-          pdftitle={The Title of the Paper},
-          pdfauthor={SÉRGIO DE ANDRADE, PAULO},
-          pdfsubject={The complete multi-sentence abstract of the paper goes here. It should be identical to the abstract that appears visually in the document after \\maketitle.},
-          pdfkeywords={Keyword1, Keyword2, Keyword3}
-        }
-        \`\`\`
-    4.  **Title, Author, and Date:** You MUST use the standard \`\\title{}\`, \`\\author{}\`, \`\\date{}\`, and \`\\maketitle\` commands.
-        -   The \`\\author\` command MUST be written EXACTLY as follows, including all formatting and line breaks. This is a strict requirement.
-            \`\`\`latex
-            \\author{
-              SÉRGIO DE ANDRADE, PAULO \\\\
-              \\small ORCID: \\url{https://orcid.org/0009-0004-2555-3178}
-            }
-            \`\`\`
-        -   **To remove the date completely, you MUST add the command \`\\date{}\` (with empty braces) before \`\\maketitle\`.**
-    5.  **Structure:** The paper must follow the standard IMRAD structure:
-        -   Abstract (Resumo)
-        -   Keywords (Palavras-chave)
-        -   Introduction (Introdução)
-        -   Literature Review (Revisão da Literatura)
-        -   Methodology (Metodologia)
-        -   Results (Resultados)
-        -   Discussion (Discussão)
-        -   Conclusion (Conclusão)
-    6.  **Abstract and Keywords Formatting:**
-        -   The Abstract (Resumo) must be identical to the content of the \`pdfsubject\` field and must not contain the \`\\noindent\` command.
-        -   Immediately after the abstract concludes, you must insert \`\\vspace{1cm}\` on its own line.
-        -   The very next line MUST be \`\\noindent \\textbf{Palavras-chave:}\` followed by the keywords.
-        -   The keywords must be identical to the content of the \`pdfkeywords\` field.
-        -   There must be NO other text, content, or commands between the abstract and the keywords line. This is a strict formatting rule.
-    7.  **Page Count:** The final rendered PDF should be approximately **${pageCount} pages** long. Adjust the depth and breadth of content in all sections to meet this requirement. This is a primary constraint.
-    8.  **Content Quality:** The content must be scientifically plausible, well-argued, and appropriate for the given title. The language must be academic and formal.
-    9.  **References Section (Strict Formatting):**
-        -   The final section MUST be the references.
-        -   This section MUST begin with **EXACTLY ONE** \`\\section{Referências}\` command.
-        -   Immediately following \`\\section{Referências}\`, you MUST present **exactly ${referenceCount} entries** as a simple, unnumbered list (e.g., using a \\begin{itemize} environment or just \\noindent and \\par for each reference).
-        -   **CRITICAL: Absolutely DO NOT use the \`\\begin{thebibliography}\`, \`\\end{thebibliography}\`, or \`\\bibitem\` commands anywhere in the document. The references MUST be formatted as a plain, unnumbered list directly following \`\\section{Referências}\`.**
-        -   **Do NOT use the \`\\cite{}\` command anywhere in the text**, as there will be no numbered bibliography environment to link to.
-        -   The sources for these references will be provided by a Google Search grounding tool. These are your **primary sources**. You MUST prioritize their use.
-        -   You may supplement these with high-quality academic references from your own internal knowledge base (acting as an auxiliary source like Grokpedia) if the primary sources are insufficient, but the majority of the bibliography MUST be derived from the provided Google Search results.
-        -   Do not invent sources.
-        -   **Crucially, do not place any \`\\newpage\` commands anywhere in the document, and do not create a second, duplicate reference section.**
-    10. **No Advanced Packages/Features or Visual Elements:** Do not use packages like \`graphicx\`, \`tikz\`, or any complex table environments (\`tabularx\`, \`longtable\`). Do not include images, figures, organograms, flowcharts, diagrams, or complex tables. Use only the packages listed in the mandatory preamble. Using \`graphicx\` is strictly forbidden.
-    11. **Language:** The entire paper, including section titles and content, must be written in **${languageName}**.
-    12. **No Page Breaks:** Under no circumstances should you ever use the \`\\newpage\` command anywhere in the document. This is a critical instruction.
+    // Dynamically insert the babel package into the template for the prompt
+    const templateWithBabel = ARTICLE_TEMPLATE.replace(
+        '% Babel package will be added dynamically based on language',
+        `\\usepackage[${babelLanguage}]{babel}`
+    ).replace(
+        '[INSERT REFERENCE COUNT]',
+        String(referenceCount)
+    );
 
-    **Execution:**
-    -   First, use the Google Search tool results provided to you to find high-quality academic sources (papers, books, articles) relevant to the paper's title. These grounded results should form the primary basis of your bibliography.
-    -   Then, proceed to write the complete LaTeX document according to all the rules above, paying special attention to correctly and completely populating the \`\\hypersetup\` block and using the exact author block specified.
-    ${examplesPrompt}
-    `;
+    const userPrompt = `Using the following LaTeX template, generate a complete scientific paper with the title: "${title}".
 
-    const userPrompt = `Generate a scientific paper with the title: "${title}"`;
+**Template:**
+\`\`\`latex
+${templateWithBabel}
+\`\`\`
+`;
 
     const response = await callModel(model, systemInstruction, userPrompt, { googleSearch: true });
     

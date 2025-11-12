@@ -19,7 +19,8 @@ interface ZenodoDeposition {
     }
 }
 
-async function apiRequest<T>(url: string, method: string, token: string, body?: object | Buffer, headers?: Record<string, string>): Promise<T> {
+// FIX: Changed body type from `object | Buffer` to `string | Buffer` to correctly handle stringified JSON and file buffers.
+async function apiRequest<T>(url: string, method: string, token: string, body?: string | Buffer, headers?: Record<string, string>): Promise<T> {
     const options: https.RequestOptions = {
         method,
         headers: {
