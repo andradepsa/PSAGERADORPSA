@@ -61,3 +61,14 @@ export interface StyleGuideOption {
     name: string;
     description: string;
 }
+
+export type ArticleEntry = {
+    id: string; // Unique ID for the entry
+    title: string;
+    date: string; // Date of publication or last attempt
+    status: 'published' | 'compilation_failed' | 'upload_failed';
+    link?: string; // Zenodo DOI link if published
+    doi?: string; // DOI if published
+    latexCode?: string; // Full LaTeX code for pending articles
+    errorMessage?: string; // Error message for failed attempts
+};
