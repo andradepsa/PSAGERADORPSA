@@ -622,117 +622,6 @@ const App: React.FC = () => {
         setStep(3);
     };
 
-    const handleExportCompilationData = () => {
-        const downloadFile = (content: string, fileName: string, contentType: string) => {
-            const blob = new Blob([content], { type: contentType });
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = fileName;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(link.href);
-        };
-        
-        const instructions = `# Como Integrar o Conhecimento Adquirido
-
-Este arquivo explica como usar os arquivos \`successful_compilations.json\` e \`failed_compilations.json\` para embutir permanentemente o conhecimento de compilação no código-fonte do aplicativo.
-
-## O Conceito: De "Aprendizagem Dinâmica" para "Conhecimento Embutido"
-
-- **Situação Atual (Aprendizagem Dinâmica):** O aplicativo aprende com as interações e armazena os exemplos de sucesso e falha no \`localStorage\` do seu navegador. Esse aprendizado é perdido se os dados do navegador forem limpos.
-- **Próximo Passo (Conhecimento Embutido):** Podemos pegar os exemplos mais informativos que você acumulou e incorporá-los diretamente no código-fonte, tornando o aplicativo "inteligente de fábrica".
-
-## Passos para a Integração:
-
-1.  **Crie um novo arquivo de "conhecimento prévio":**
-    No diretório \`services/\`, crie um novo arquivo chamado \`preloadedExamples.ts\`.
-
-2.  **Copie os dados dos arquivos JSON:**
-    Abra \`successful_compilations.json\` e \`failed_compilations.json\`. Copie o conteúdo de cada um para o novo arquivo \`preloadedExamples.ts\`, estruturando-os como constantes exportadas.
-
-    \`\`\`typescript
-    // Em services/preloadedExamples.ts
-
-    export const PRELOADED_SUCCESSFUL_EXAMPLES: string[] = [
-        // Cole aqui o conteúdo do array de successful_compilations.json
-        // Exemplo:
-        // "\\documentclass{article}\\begin{document}Hello World\\end{document}}",
-        // "..."
-    ];
-
-    export const PRELOADED_FAILED_EXAMPLES: string[] = [
-        // Cole aqui o conteúdo do array de failed_compilations.json
-        // Exemplo:
-        // "\\documentclass{article}\\begin{document}Unbalanced {\\end{document}}",
-        // "..."
-    ];
-    \`\`\`
-
-3.  **Modifique o serviço de exemplos de compilação (\`compilationExamples.ts\`):**
-    Altere o arquivo \`services/compilationExamples.ts\` para adotar uma abordagem híbrida, carregando primeiro os exemplos embutidos e depois os do \`localStorage\`.
-
-    \`\`\`typescript
-    // Em services/compilationExamples.ts (Exemplo de como ficaria a função getStoredExamples)
-    import { PRELOADED_SUCCESSFUL_EXAMPLES, PRELOADED_FAILED_EXAMPLES } from './preloadedExamples';
-
-    const SUCCESSFUL_KEY = 'successful_latex_compilations';
-    const FAILED_KEY = 'failed_latex_compilations';
-
-    function getStoredExamples(key: string): string[] {
-        let preloaded: string[] = [];
-        if (key === SUCCESSFUL_KEY) {
-            preloaded = PRELOADED_SUCCESSFUL_EXAMPLES;
-        } else if (key === FAILED_KEY) {
-            preloaded = PRELOADED_FAILED_EXAMPLES;
-        }
-
-        try {
-            const stored = localStorage.getItem(key);
-            const localExamples = stored ? JSON.parse(stored) : [];
-            // Combine e remova duplicatas, dando preferência aos exemplos locais mais recentes.
-            const combined = [...preloaded, ...localExamples];
-            return [...new Set(combined)]; // Retorna um array com valores únicos
-        } catch (e) {
-            console.error(\`Error reading \${key} from localStorage\`, e);
-            return preloaded; // Retorna os pré-carregados se o localStorage falhar
-        }
-    }
-
-    // ... o resto do arquivo permanece o mesmo ...
-    \`\`\`
-
-## Vantagens Desta Abordagem
-
-- **Inteligência Imediata:** Todo novo usuário se beneficia do conhecimento acumulado.
-- **Robustez:** O conhecimento principal não é perdido ao limpar o cache do navegador.
-- **Melhor Desempenho Inicial:** A IA tem um ponto de partida muito melhor, potencialmente reduzindo o número de falhas de compilação desde o início.
-
----
-**Aviso:** Sempre que houver uma atualização significativa nos exemplos (após acumular muitos novos dados de compilação), você pode repetir este processo para atualizar os arquivos em \`preloadedExamples.ts\`.
-`;
-    
-        const successfulData = localStorage.getItem('successful_latex_compilations') || '[]';
-        const failedData = localStorage.getItem('failed_latex_compilations') || '[]';
-    
-        try {
-            // Beautify the JSON
-            const successfulJson = JSON.stringify(JSON.parse(successfulData), null, 2);
-            const failedJson = JSON.stringify(JSON.parse(failedData), null, 2);
-    
-            // Download files
-            downloadFile(successfulJson, 'successful_compilations.json', 'application/json');
-            downloadFile(failedJson, 'failed_compilations.json', 'application/json');
-            downloadFile(instructions, 'instructions-to-embed-data.md', 'text/markdown');
-            
-            alert('✅ Exportação concluída! Verifique seus downloads para os arquivos JSON e o guia de instruções.');
-    
-        } catch (e) {
-            console.error("Error exporting compilation data:", e);
-            alert("❌ Ocorreu um erro ao exportar os dados. Verifique o console para mais detalhes.");
-        }
-    };
-    
     const getStepCardClass = (stepNum: number) => {
         let classes = 'step-card cursor-pointer';
         if (step === stepNum) classes += ' active';
@@ -886,11 +775,6 @@ Este arquivo explica como usar os arquivos \`successful_compilations.json\` e \`
                                 </div>
                                 <p className="text-center text-xs text-gray-500 mt-2">Generates 7 articles automatically, every day at 3:00 AM.</p>
                             </div>
-                             <div className="mt-6 border-t pt-6 text-center">
-                                 <button onClick={handleExportCompilationData} className="text-sm text-indigo-600 hover:underline">
-                                    Exportar Dados de Aprendizagem de Compilação
-                                </button>
-                             </div>
 
                         </div>
                         <div className="bg-gray-50 p-4 rounded-lg">
