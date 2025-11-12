@@ -195,6 +195,11 @@ export async function generateInitialPaper(title: string, language: Language, pa
     else if (pageCount === 60) referenceCount = 60;
     else if (pageCount === 100) referenceCount = 100;
 
+    const referencePlaceholders = Array.from(
+        { length: referenceCount },
+        (_, i) => `[INSERT REFERENCE ${i + 1} HERE]`
+    ).join('\n\n');
+
     const systemInstruction = `You are a world-class AI assistant specialized in generating high-quality, well-structured scientific papers in LaTeX format. Your task is to write a complete, coherent, and academically rigorous paper based on a provided title, strictly following a given LaTeX template.
 
 **Execution Rules:**
@@ -204,18 +209,21 @@ export async function generateInitialPaper(title: string, language: Language, pa
     -   \`[INSERT NEW COMPLETE ABSTRACT HERE]\`: Write a new abstract for the paper. This same abstract must be used in both the \`\\hypersetup{pdfsubject={...}}\` block and the \`\\begin{abstract}\` environment. The abstract text itself must not contain any LaTeX commands.
     -   \`[INSERT COMMA-SEPARATED KEYWORDS HERE]\`: Provide new keywords relevant to the title.
     -   \`[INSERT NEW CONTENT FOR ... SECTION HERE]\`: Write substantial, high-quality academic content for each section (Introduction, Literature Review, etc.) to generate a paper of approximately **${pageCount} pages**.
-    -   \`[INSERT NEW REFERENCE LIST HERE]\`: Generate a new list of exactly **${referenceCount}** academic references relevant to the title. Use Google Search grounding for this. Format each reference as a plain paragraph, for example, starting with \`\\noindent\` and ending with \`\\par\`. Do NOT use \`\\bibitem\` or \`thebibliography\`.
+    -   \`[INSERT REFERENCE 1 HERE]\` through \`[INSERT REFERENCE ${referenceCount} HERE]\`: For each of these placeholders, generate a single, unique academic reference relevant to the title. Use Google Search grounding for this. Each generated reference must be a plain paragraph, for example, starting with \`\\noindent\` and ending with \`\\par\`. Do NOT use \`\\bibitem\` or \`thebibliography\`.
 3.  **Strictly Adhere to Structure:** Do NOT modify the LaTeX structure provided in the template. Do not add or remove packages, change the author information, or alter the section commands. The only exception is adding the correct babel package for the language.
 4.  **Language:** The entire paper must be written in **${languageName}**.
 5.  **Output Format:** The entire output MUST be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) around the LaTeX code.`;
 
-    // Dynamically insert the babel package into the template for the prompt
+    // Dynamically insert the babel package and reference placeholders into the template for the prompt
     const templateWithBabel = ARTICLE_TEMPLATE.replace(
         '% Babel package will be added dynamically based on language',
         `\\usepackage[${babelLanguage}]{babel}`
     ).replace(
         '[INSERT REFERENCE COUNT]',
         String(referenceCount)
+    ).replace(
+        '[INSERT NEW REFERENCE LIST HERE]',
+        referencePlaceholders
     );
 
     const userPrompt = `Using the following LaTeX template, generate a complete scientific paper with the title: "${title}".

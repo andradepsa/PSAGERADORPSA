@@ -56,9 +56,10 @@ export const ARTICLE_TEMPLATE = `\\documentclass[12pt,a4paper]{article}
 [INSERT NEW CONTENT FOR CONCLUSION SECTION HERE. The content must be extensive and detailed to meet the required page count.]
 
 \\section{Referências}
-% Provide exactly [INSERT REFERENCE COUNT] entries as a plain, unnumbered list.
-% Each reference must start with \\noindent and end with \\par.
+% The AI service will dynamically replace the placeholder below with [INSERT REFERENCE COUNT]
+% individual placeholders, one for each reference, separated by blank lines.
+% Each reference must be a plain paragraph starting with \\noindent and ending with \\par.
 % CRITICAL: Absolutely DO NOT use \\begin{thebibliography} or \\bibitem.
 [INSERT NEW REFERENCE LIST HERE]
 
-\\end{document}`;
+\\end{document}`
