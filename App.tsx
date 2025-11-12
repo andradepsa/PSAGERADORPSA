@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide } from './services/geminiService';
 import type { Language, IterationAnalysis, PaperSource, AnalysisResult, StyleGuide } from './types';
 import { LANGUAGES, AVAILABLE_MODELS, ANALYSIS_TOPICS, MATH_TOPICS, FIX_OPTIONS, STYLE_GUIDES } from './constants';
-import { addSuccessfulCompilation, addFailedCompilation } from './services/compilationExamples';
+
 
 import LanguageSelector from './components/LanguageSelector';
 import ModelSelector from './components/ModelSelector';
@@ -93,6 +93,7 @@ const App: React.FC = () => {
     const [isSchedulerActive, setIsSchedulerActive] = useState(() => {
         return localStorage.getItem('schedulerActive') === 'true';
     });
+    // Fix: Declare schedulerTimeoutRef using `const` and `useRef` to properly scope it.
     const schedulerTimeoutRef = useRef<number | null>(null);
     const uploaderRef = useRef<ZenodoUploaderRef>(null);
 
@@ -207,7 +208,6 @@ const App: React.FC = () => {
                     const blob = await (await fetch(pdfUrl)).blob();
                     const file = new File([blob], "paper.pdf", { type: "application/pdf" });
                     
-                    addSuccessfulCompilation(codeToCompile);
                     return { pdfFile: file, pdfUrl, finalCode: codeToCompile };
 
                 } catch (error) {
@@ -253,7 +253,6 @@ const App: React.FC = () => {
                     const blob = await (await fetch(pdfUrl)).blob();
                     const file = new File([blob], "paper.pdf", { type: "application/pdf" });
 
-                    addSuccessfulCompilation(fixedCode);
                     return { pdfFile: file, pdfUrl, finalCode: fixedCode };
                     
                 } catch (finalCompileError) {
@@ -263,7 +262,6 @@ const App: React.FC = () => {
             }
             throw new Error("Falha na compilação após todas as tentativas.");
         } catch(error) {
-            addFailedCompilation(codeToCompile);
             throw error; // Re-throw the error to be handled by the calling function
         }
     };
