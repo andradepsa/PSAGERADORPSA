@@ -187,7 +187,8 @@ export async function generateInitialPaper(title: string, language: Language, pa
     -   \`[INSERT REFERENCE 1 HERE]\` through \`[INSERT REFERENCE ${referenceCount} HERE]\`: For each of these placeholders, generate a single, unique academic reference relevant to the title. Use Google Search grounding for this. Each generated reference must be a plain paragraph, for example, starting with \`\\noindent\` and ending with \`\\par\`. Do NOT use \`\\bibitem\` or \`thebibliography\`.
 3.  **Strictly Adhere to Structure:** Do NOT modify the LaTeX structure provided in the template. Do not add or remove packages, change the author information, or alter the section commands. The only exception is adding the correct babel package for the language.
 4.  **Language:** The entire paper must be written in **${languageName}**.
-5.  **Output Format:** The entire output MUST be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) around the LaTeX code.`;
+5.  **Output Format:** The entire output MUST be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) around the LaTeX code.
+6.  **CRITICAL: References generated MUST NOT contain any URLs or web links. Format them as academic citations only, without any \\url{} commands or direct links.**`;
 
     // Dynamically insert the babel package and reference placeholders into the template for the prompt
     const templateWithBabel = ARTICLE_TEMPLATE.replace(
@@ -326,6 +327,7 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     -   **Do NOT use the \`\\cite{}\` command anywhere in the text.**
     -   **Do NOT add or remove \`\\newpage\` commands. Let the LaTeX engine handle page breaks automatically.**
     -   **Crucially, do NOT include any images, figures, organograms, flowcharts, diagrams, or complex tables in the improved paper.**
+    -   **CRITICAL: Ensure that no URLs or web links are present in the references section. All references must be formatted as academic citations only, without any \\url{} commands or direct links.**
     -   Focus on improving aspects directly related to the provided feedback. Do not introduce new content unless necessary to address a critique.
     `;
 
@@ -357,6 +359,7 @@ export async function fixLatexPaper(paperContent: string, fixesToApply: { key: s
     -   **Do NOT use the \`\\cite{}\` command anywhere in the text.**
     -   **Do NOT add or remove \`\\newpage\` commands. Let the LaTeX engine handle page breaks automatically.**
     -   **Do NOT include any images, figures, organograms, flowcharts, diagrams, or complex tables in the fixed paper.**
+    -   **CRITICAL: Ensure that no URLs or web links are present in the references section. All references must be formatted as academic citations only, without any \\url{} commands or direct links.**
     -   Return only the corrected LaTeX source code.
     `;
 
@@ -388,6 +391,7 @@ export async function reformatPaperWithStyleGuide(paperContent: string, styleGui
     4.  The new reference list must strictly adhere to the **${styleGuideInfo.name} (${styleGuideInfo.description})** formatting rules.
     5.  The number of references in the output must be the same as in the input.
     6.  The final output must be the **COMPLETE, FULL** LaTeX document, with only the reference section's content modified. Do not provide only the reference section or include any explanatory text or markdown formatting.
+    7.  **CRITICAL: Ensure that no URLs or web links are present in the reformatted references. All references must be formatted as academic citations only, without any \\url{} commands or direct links.**
     `;
 
     const userPrompt = `Please reformat the references in the following LaTeX document to conform to the ${styleGuideInfo.name} style guide. Return the full, unchanged document with only the reference list updated.

@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
 
-const CONFIG_FILE = path.join(process.cwd(), 'config.json');
+const CONFIG_FILE = path.join((process as any).cwd(), 'config.json');
 
 export interface Config {
     geminiApiKey?: string;
@@ -14,11 +14,11 @@ export interface Config {
 
 const question = (query: string, isSecret: boolean = false): Promise<string> => {
     const rl = readline.createInterface({ 
-        input: process.stdin, 
-        output: process.stdout 
+        input: (process as any).stdin, 
+        output: (process as any).stdout 
     });
     
-    if (isSecret && process.stdout.isTTY) {
+    if (isSecret && (process as any).stdout.isTTY) {
       const self = rl as any;
       self.output.write(query);
       self.history = self.history || [];
@@ -58,7 +58,7 @@ const question = (query: string, isSecret: boolean = false): Promise<string> => 
              // That hook calls rl.close() on 'return', which fires this event.
              rl.on('close', () => {
                  // The hook also sets rl.line with the captured secret.
-                 process.stdout.write('\n'); // Manually add a newline for clean output.
+                 (process as any).stdout.write('\n'); // Manually add a newline for clean output.
                  resolve((rl as any).line);
              });
              // We must manually start the prompt to begin listening for input.

@@ -10,11 +10,11 @@ import https from 'https';
 const execAsync = promisify(exec);
 
 const TINYTEX_INSTALL_SCRIPT_URL = 'https://raw.githubusercontent.com/yihui/tinytex/master/tools/install-unx.sh';
-const TINYTEX_DIR = path.join(process.cwd(), 'tinytex');
+const TINYTEX_DIR = path.join((process as any).cwd(), 'tinytex');
 const TINYTEX_PDFLATEX = path.join(TINYTEX_DIR, 'bin', 'pdflatex');
 
 const question = (query: string): Promise<string> => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const rl = readline.createInterface({ input: (process as any).stdin, output: (process as any).stdout });
     return new Promise(resolve => rl.question(query, (ans) => {
         rl.close();
         resolve(ans);
@@ -23,7 +23,7 @@ const question = (query: string): Promise<string> => {
 
 async function commandExists(command: string): Promise<boolean> {
     try {
-        const { stdout } = await execAsync(process.platform === 'win32' ? `where ${command}` : `command -v ${command}`);
+        const { stdout } = await execAsync((process as any).platform === 'win32' ? `where ${command}` : `command -v ${command}`);
         return !!stdout;
     } catch (e) {
         return false;
@@ -37,13 +37,13 @@ async function installTinyTeX(): Promise<void> {
         return;
     }
 
-    if (process.platform === 'win32') {
+    if ((process as any).platform === 'win32') {
          console.log('[INFO] Windows detected. Please install MiKTeX or another LaTeX distribution manually and ensure pdflatex is in your PATH.');
          throw new Error('Automatic LaTeX installation not supported on Windows. Please install it manually.');
     }
 
     console.log(`[INFO] Downloading installation script from ${TINYTEX_INSTALL_SCRIPT_URL}...`);
-    const installScriptPath = path.join(process.cwd(), 'install-tinytex.sh');
+    const installScriptPath = path.join((process as any).cwd(), 'install-tinytex.sh');
     
     await new Promise<void>((resolve, reject) => {
         const file = fs.createWriteStream(installScriptPath);
@@ -95,7 +95,7 @@ export async function setupLatexCompiler(): Promise<void> {
         await installTinyTeX();
     } else {
         console.error('[ERROR] Cannot proceed without a LaTeX compiler. Please install one manually (like TeX Live, MiKTeX) and ensure `pdflatex` is in your PATH.');
-        process.exit(1);
+        (process as any).exit(1);
     }
 }
 
