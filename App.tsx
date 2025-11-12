@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide } from './services/geminiService';
 import type { Language, IterationAnalysis, PaperSource, AnalysisResult, StyleGuide, ArticleEntry } from './types';
-import { LANGUAGES, AVAILABLE_MODELS, ANALYSIS_TOPICS, MATH_TOPICS, FIX_OPTIONS, STYLE_GUIDES } from './constants';
+import { LANGUAGES, AVAILABLE_MODELS, ANALYSIS_TOPICS, MATH_TOPICS, FIX_OPTIONS, STYLE_GUIDES, TOTAL_ITERATIONS } from './constants';
 
 
 import LanguageSelector from './components/LanguageSelector';
@@ -20,8 +20,6 @@ import ZenodoUploader, { type ZenodoUploaderRef } from './components/ZenodoUploa
 
 // This is needed for the pdf.js script loaded in index.html
 declare const pdfjsLib: any;
-
-const TOTAL_ITERATIONS = 12;
 
 type Author = {
     name: string;
@@ -478,17 +476,24 @@ const App: React.FC = () => {
                 }
             } // end for
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : `Ocorreu um erro desconhecido no artigo ${currentArticleIndex}.`;
+            // FIX: Ensure the article number is valid for error messages and provide a fallback title.
+            // This makes error logging more robust, addressing the "scope error" hint by ensuring
+            // that a failure is always correctly and meaningfully registered, even if it occurs
+            // before the article title or index is properly set.
+            const articleNumberForError = currentArticleIndex > 0 ? currentArticleIndex : 1;
+            const fallbackTitle = latestProcessedTitle || `Artigo ${articleNumberForError} (Geração Falhou)`;
+
+            const errorMessage = error instanceof Error ? error.message : `Ocorreu um erro desconhecido no artigo ${articleNumberForError}.`;
             
             if (errorMessage.toLowerCase().includes('quota')) {
                 setGenerationStatus(`⚠️ Limite de cota da API atingido. A automação foi pausada. O processo será retomado no próximo dia agendado.`);
             } else {
-                setGenerationStatus(`❌ Erro no artigo ${currentArticleIndex}: ${errorMessage}. Parando automação.`);
+                setGenerationStatus(`❌ Erro no artigo ${articleNumberForError}: ${errorMessage}. Parando automação.`);
             }
 
             setArticleEntries(prev => [...prev, {
-                id: currentArticleEntryId,
-                title: latestProcessedTitle,
+                id: currentArticleEntryId || crypto.randomUUID(), // Ensure an ID exists
+                title: fallbackTitle,
                 date: new Date().toISOString(),
                 status: 'upload_failed',
                 latexCode: latestProcessedLatexCode,

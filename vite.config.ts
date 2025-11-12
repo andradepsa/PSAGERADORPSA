@@ -1,8 +1,11 @@
-// FIX: The original /// <reference types="node" /> directive was removed as it caused a "Cannot find type definition file" error.
+/// <reference types="node" />
 
 import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
+// FIX: Import `process` to provide type definitions for the Node.js process object,
+// resolving errors related to missing properties like `cwd` and type definitions for 'node'.
+import process from 'process';
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
@@ -18,9 +21,7 @@ export default defineConfig(({ mode }) => {
       },
       resolve: {
         alias: {
-          // Fix: Replace `__dirname` with `process.cwd()` because `__dirname` is not available in ES modules.
-          // FIX: Cast `process` to `any` to access `cwd` because node types are unavailable, which resolves the "Property 'cwd' does not exist" error.
-          '@': path.resolve((process as any).cwd(), '.'),
+          '@': path.resolve(process.cwd(), '.'),
         }
       }
     };
