@@ -367,7 +367,7 @@ const App: React.FC = () => {
 
                 } catch (error) {
                     const errorMessage = error instanceof Error ? error.message : 'Falha na compilação por motivo desconhecido.';
-                    setGenerationStatus(`❌ Falha na compilação do Artigo ${i}. O código foi salvo como exemplo de erro. Pulando para o próximo...`);
+                    setGenerationStatus(`❌ Falha na compilação do Artigo ${i}. Pulando para o próximo...`); // Removed misleading "código foi salvo como exemplo de erro"
                     console.error(`Compilation failed for paper ${i}:`, error);
                     // Wait a moment so the user can read the status update
                     await new Promise(resolve => setTimeout(resolve, 4000)); 
