@@ -15,15 +15,17 @@ function getStoredExamples(key: string): string[] {
     try {
         const stored = localStorage.getItem(key);
         const localExamples = stored ? JSON.parse(stored) : [];
-        // Combine local examples with preloaded ones and remove duplicates.
-        // new Set() keeps the first occurrence, so this prioritizes local examples if duplicates exist.
-        const combined = [...localExamples, ...preloaded];
+        // Combine preloaded and local examples, then remove duplicates.
+        // This ensures the list is unique and prioritizes more recent local examples if they are the same.
+        const combined = [...preloaded, ...localExamples];
         return [...new Set(combined)];
     } catch (e) {
         console.error(`Error reading ${key} from localStorage`, e);
-        return preloaded; // Fallback to preloaded examples if localStorage fails.
+        // If localStorage fails, return the preloaded examples as a fallback.
+        return preloaded;
     }
 }
+
 
 /**
  * Adds a new example to localStorage.
@@ -33,27 +35,21 @@ function getStoredExamples(key: string): string[] {
  */
 function addExample(key: string, code: string, limit: number | null) {
     try {
-        const stored = localStorage.getItem(key);
-        const localExamples = stored ? JSON.parse(stored) : [];
+        const examples = getStoredExamples(key);
+        // Avoid adding duplicates
+        if (examples.includes(code)) return;
 
-        // To avoid polluting localStorage with preloaded examples, we check against all known examples
-        // before adding a new one only to the local list.
-        const allKnownExamples = new Set(getStoredExamples(key));
-        if (allKnownExamples.has(code)) {
-            return;
-        }
+        examples.push(code);
 
-        localExamples.push(code);
-
+        // Only enforce the limit if it's provided and not null
         if (limit !== null) {
-            while (localExamples.length > limit) {
-                localExamples.shift(); // FIFO
+            while (examples.length > limit) {
+                examples.shift(); // FIFO
             }
         }
         
-        localStorage.setItem(key, JSON.stringify(localExamples));
-    } catch (e)
-        {
+        localStorage.setItem(key, JSON.stringify(examples));
+    } catch (e) {
         console.error(`Error writing to ${key} in localStorage`, e);
     }
 }
@@ -73,7 +69,7 @@ function getRandomSample<T>(arr: T[], count: number): T[] {
     return shuffled.slice(0, count);
 }
 
-export function getCompilationExamplesForPrompt(count: number = 2): { successful: string[], failed: string[] } {
+export function getCompilationExamplesForPrompt(count: number = 5): { successful: string[], failed: string[] } {
     const successful = getStoredExamples(SUCCESSFUL_KEY);
     const failed = getStoredExamples(FAILED_KEY);
 

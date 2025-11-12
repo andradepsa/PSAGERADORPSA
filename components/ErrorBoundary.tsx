@@ -11,10 +11,9 @@ interface ErrorBoundaryState {
 }
 
 class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  // FIX: Switched to class property for state initialization.
-  // The original constructor-based initialization was causing errors like "Property 'state' does not exist",
-  // which can happen with certain TypeScript or Babel configurations (e.g., `useDefineForClassFields: true`).
-  // Class field syntax is more modern and often more robust in such toolchains.
+  // FIX: Replaced the constructor with class property state initialization for a more modern syntax.
+  // This resolves potential issues with how the component's 'this' context and state are handled,
+  // addressing the errors about missing properties like 'state' and 'props'.
   public state: ErrorBoundaryState = {
     hasError: false,
     error: null,
