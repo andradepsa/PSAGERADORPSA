@@ -1,28 +1,14 @@
-import { PRELOADED_SUCCESSFUL_EXAMPLES, PRELOADED_FAILED_EXAMPLES } from './preloadedExamples';
-
 const MAX_SUCCESSFUL_EXAMPLES = 100;
 const SUCCESSFUL_KEY = 'successful_latex_compilations';
 const FAILED_KEY = 'failed_latex_compilations';
 
 function getStoredExamples(key: string): string[] {
-    let preloaded: string[] = [];
-    if (key === SUCCESSFUL_KEY) {
-        preloaded = PRELOADED_SUCCESSFUL_EXAMPLES;
-    } else if (key === FAILED_KEY) {
-        preloaded = PRELOADED_FAILED_EXAMPLES;
-    }
-
     try {
         const stored = localStorage.getItem(key);
-        const localExamples = stored ? JSON.parse(stored) : [];
-        // Combine preloaded and local examples, then remove duplicates.
-        // This ensures the list is unique and prioritizes more recent local examples if they are the same.
-        const combined = [...preloaded, ...localExamples];
-        return [...new Set(combined)];
+        return stored ? JSON.parse(stored) : [];
     } catch (e) {
         console.error(`Error reading ${key} from localStorage`, e);
-        // If localStorage fails, return the preloaded examples as a fallback.
-        return preloaded;
+        return [];
     }
 }
 
@@ -62,19 +48,4 @@ export function addSuccessfulCompilation(code: string) {
 export function addFailedCompilation(code: string) {
     // No limit for failed compilations
     addExample(FAILED_KEY, code, null);
-}
-
-function getRandomSample<T>(arr: T[], count: number): T[] {
-    const shuffled = [...arr].sort(() => 0.5 - Math.random());
-    return shuffled.slice(0, count);
-}
-
-export function getCompilationExamplesForPrompt(count: number = 5): { successful: string[], failed: string[] } {
-    const successful = getStoredExamples(SUCCESSFUL_KEY);
-    const failed = getStoredExamples(FAILED_KEY);
-
-    return {
-        successful: getRandomSample(successful, count),
-        failed: getRandomSample(failed, count)
-    };
 }

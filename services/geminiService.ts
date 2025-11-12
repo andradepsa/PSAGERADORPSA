@@ -1,7 +1,6 @@
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Language, AnalysisResult, PaperSource, StyleGuide } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES } from '../constants';
-import { getCompilationExamplesForPrompt } from './compilationExamples';
 import { ARTICLE_TEMPLATE } from './articleTemplate'; // Import the single article template
 
 // Removed the global 'ai' instance. It will now be created on-demand.
@@ -60,30 +59,6 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
     }
     // This should be unreachable
     throw new Error("API call failed after all retry attempts.");
-}
-
-function formatExamplesForPrompt(examples: { successful: string[], failed: string[] }): string {
-    let promptSection = '';
-
-    if (examples.successful.length > 0) {
-        promptSection += '\n\n**Compilation Guidance from Past Examples:**\nTo ensure the generated LaTeX is valid and compiles without errors, please learn from the following examples.\n';
-        promptSection += '\n***Examples of LaTeX that COMPILED SUCCESSFULLY (DO THIS):***\n';
-        examples.successful.forEach((code, index) => {
-            promptSection += `--- SUCCESSFUL EXAMPLE ${index + 1} ---\n${code}\n--- END SUCCESSFUL EXAMPLE ${index + 1} ---\n`;
-        });
-    }
-
-    if (examples.failed.length > 0) {
-        if (promptSection === '') { // In case there are no successful examples
-            promptSection += '\n\n**Compilation Guidance from Past Examples:**\nTo ensure the generated LaTeX is valid and compiles without errors, please learn from the following examples.\n';
-        }
-        promptSection += '\n***Examples of LaTeX that FAILED to compile (AVOID THIS):***\n';
-        examples.failed.forEach((code, index) => {
-            promptSection += `--- FAILED EXAMPLE ${index + 1} ---\n${code}\n--- END FAILED EXAMPLE ${index + 1} ---\n`;
-        });
-    }
-
-    return promptSection;
 }
 
 // Central dispatcher for different AI models
@@ -338,9 +313,6 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
         .map(item => `- **${item.topicName} (Score: ${item.score})**: ${item.improvement}`)
         .join('\n');
 
-    const examples = getCompilationExamplesForPrompt();
-    const examplesPrompt = formatExamplesForPrompt(examples);
-
     const systemInstruction = `You are a world-class AI assistant specialized in editing and improving scientific papers written in LaTeX. Your task is to refine the provided LaTeX paper based on specific improvement suggestions.
 
     **Instructions for Improvement:**
@@ -355,7 +327,6 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     -   **Do NOT add or remove \`\\newpage\` commands. Let the LaTeX engine handle page breaks automatically.**
     -   **Crucially, do NOT include any images, figures, organograms, flowcharts, diagrams, or complex tables in the improved paper.**
     -   Focus on improving aspects directly related to the provided feedback. Do not introduce new content unless necessary to address a critique.
-    ${examplesPrompt}
     `;
 
     const userPrompt = `Current Paper Content:\n\n${paperContent}\n\nImprovement Points:\n\n${improvementPoints}\n\nBased on the above improvement points, provide the complete, improved LaTeX source code for the paper.`;
@@ -374,9 +345,6 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
 export async function fixLatexPaper(paperContent: string, fixesToApply: { key: string; label: string; description: string }[], model: string): Promise<string> {
     const fixInstructions = fixesToApply.map(fix => `**${fix.label}**: ${fix.description}`).join('\n- ');
 
-    const examples = getCompilationExamplesForPrompt();
-    const examplesPrompt = formatExamplesForPrompt(examples);
-
     const systemInstruction = `You are an expert LaTeX editor AI. Your task is to fix common compilation and formatting issues in a given LaTeX document based on specific instructions.
 
     **Instructions for Fixing:**
@@ -390,7 +358,6 @@ export async function fixLatexPaper(paperContent: string, fixesToApply: { key: s
     -   **Do NOT add or remove \`\\newpage\` commands. Let the LaTeX engine handle page breaks automatically.**
     -   **Do NOT include any images, figures, organograms, flowcharts, diagrams, or complex tables in the fixed paper.**
     -   Return only the corrected LaTeX source code.
-    ${examplesPrompt}
     `;
 
     const userPrompt = `Current LaTeX Paper:\n\n${paperContent}\n\nApply the specified fixes and provide the complete, corrected LaTeX source code.`;
