@@ -1,30 +1,94 @@
-# PROMPT MESTRE PARA RECRIAÇÃO TOTAL DO PROJETO
+# PROMPT MESTRE: RECRIAÇÃO DO GERADOR DE ARTIGOS CIENTÍFICOS
 
-**Instrução para a IA (Copie este conteúdo):**
-
-Você deve agir como um Engenheiro de Software Sênior e recriar uma aplicação React completa chamada "Gerador de Artigos Científicos". Abaixo está a documentação completa, incluindo as listas de dados (tópicos), a lógica exata de geração de títulos e o funcionamento detalhado do loop de iterações de qualidade.
-
----
-
-## 1. Stack Tecnológico
-
-*   **Frontend:** React 19, TypeScript, Vite.
-*   **Estilização:** TailwindCSS.
-*   **IA:** Google GenAI SDK (`@google/genai` v1.25.0+).
-*   **Compilação:** LaTeX (via API proxy para TeXLive.net).
-*   **Armazenamento:** LocalStorage (para chaves de API e histórico).
+**Instrução para a IA:**
+Você deve atuar como um Engenheiro de Software Sênior e recriar uma aplicação web completa baseada nas especificações e códigos abaixo. O objetivo é um sistema robusto de geração, análise e publicação de artigos científicos usando React, Google Gemini e LaTeX.
 
 ---
 
-## 2. "O Cérebro": Dados e Constantes (`constants.ts`)
+## 1. Estrutura do Projeto e Dependências
 
-Esta seção define os **Tópicos e Subtópicos** que alimentam a criação do título, e os **Critérios de Análise** para as iterações.
+**Stack:**
+- React 19
+- TypeScript
+- Vite
+- TailwindCSS
+- @google/genai (SDK v1.25.0+)
+- Ace Editor (via CDN ou react-ace) para edição de LaTeX
+
+**Dependências (package.json):**
+```json
+{
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "@google/genai": "^1.25.0"
+  },
+  "devDependencies": {
+    "vite": "^6.2.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "~5.8.2",
+    "@types/node": "^22.14.0"
+  }
+}
+```
+
+---
+
+## 2. Dados e Constantes (`constants.ts`)
+
+Este arquivo contém a lista expandida de tópicos para garantir variedade e os critérios de análise.
 
 ```typescript
-// constants.ts
+import type { LanguageOption, AnalysisTopic, StyleGuideOption } from './types';
 
-// 1. TÓPICOS MATEMÁTICOS (A base para a geração do título)
-// Esta lista deve ser EXATAMENTE assim para garantir variedade:
+export const TOTAL_ITERATIONS = 12;
+
+export const LANGUAGES: LanguageOption[] = [
+    { code: 'en', name: 'English', flag: '🇬🇧' },
+    { code: 'pt', name: 'Português', flag: '🇧🇷' },
+    { code: 'es', name: 'Español', flag: '🇪🇸' },
+    { code: 'fr', name: 'Français', flag: '🇫🇷' },
+];
+
+export const AVAILABLE_MODELS = [
+    { name: 'gemini-2.5-flash', description: 'Fast and efficient (Recommended for Analysis)' },
+    { name: 'gemini-2.5-pro', description: 'High intelligence (Recommended for Writing)' },
+    { name: 'gemini-3-pro-preview', description: 'Next-gen reasoning (Experimental/Limited Quota)' },
+];
+
+export const STYLE_GUIDES: StyleGuideOption[] = [
+    { key: 'abnt', name: 'ABNT', description: 'Associação Brasileira de Normas Técnicas' },
+    { key: 'apa', name: 'APA', description: 'American Psychological Association 7th Ed.' },
+    { key: 'mla', name: 'MLA', description: 'Modern Language Association 9th Ed.' },
+    { key: 'ieee', name: 'IEEE', description: 'Institute of Electrical and Electronics Engineers' },
+];
+
+export const FIX_OPTIONS = [
+    { key: 'escape_chars', label: 'Fix Character Escaping', description: 'Fixes unescaped %, $, _, &.' },
+    { key: 'citation_mismatch', label: 'Fix Citation Mismatches', description: 'Matches \\cite{} with references.' },
+    { key: 'preamble_check', label: 'Verify Preamble', description: 'Ensures required packages are loaded.' }
+];
+
+export const ANALYSIS_TOPICS: AnalysisTopic[] = [
+    { num: 0, name: 'TOPIC FOCUS', desc: 'Mantém o foco central sem desviar.' },
+    { num: 1, name: 'WRITING CLARITY', desc: 'Qualidade gramatical e legibilidade.' },
+    { num: 2, name: 'METHODOLOGICAL RIGOR', desc: 'Validez científica da metodologia.' },
+    { num: 3, name: 'ORIGINALITY', desc: 'Contribuição nova para a área.' },
+    { num: 4, name: 'LITERATURE REVIEW', desc: 'Uso adequado de fontes e contexto.' },
+    { num: 5, name: 'METHODOLOGY CLARITY', desc: 'Clareza e reprodutibilidade.' },
+    { num: 6, name: 'RESULTS PRESENTATION', desc: 'Organização e objetividade dos resultados.' },
+    { num: 7, name: 'DISCUSSION DEPTH', desc: 'Interpretação e link com teoria.' },
+    { num: 8, name: 'ABSTRACT QUALITY', desc: 'Resumo conciso e completo.' },
+    { num: 9, name: 'INTRODUCTION QUALITY', desc: 'Contexto e definição do problema.' },
+    { num: 10, name: 'CONCLUSION QUALITY', desc: 'Resumo de achados e trabalhos futuros.' },
+    { num: 11, name: 'ARGUMENTATION STRENGTH', desc: 'Lógica e evidências.' },
+    { num: 12, name: 'COHERENCE AND FLOW', desc: 'Transições suaves entre seções.' },
+    { num: 13, name: 'STRUCTURE', desc: 'Organização geral do LaTeX.' },
+    { num: 14, name: 'REFERENCES', desc: 'Formatação e relevância.' },
+    { num: 23, name: 'LATEX ACCURACY', desc: 'Compilabilidade técnica.' },
+    { num: 28, name: 'PAGE COUNT', desc: 'Adesão ao tamanho solicitado.' }
+];
+
 export const MATH_TOPICS: string[] = [
     'Fundamentos da Matemática',
     'Lógica Matemática',
@@ -33,12 +97,12 @@ export const MATH_TOPICS: string[] = [
     'Argumentos e deduções válidas',
     'Quantificadores (∀, ∃)',
     'Teoria dos Conjuntos',
-    'Conjuntos e operações (união, interseção, complemento)',
+    'Conjuntos e operações',
     'Relações e funções',
-    'Cardinalidade e infinitos (enumerável, não enumerável)',
+    'Cardinalidade e infinitos',
     'Paradoxo de Russell',
-    'Axiomas de Zermelo–Fraenkel (ZF e ZFC)',
-    'Teoria dos Números Fundamentais',
+    'Axiomas de Zermelo–Fraenkel',
+    'Teoria dos Números',
     'Axiomas de Peano',
     'Aritmética modular',
     'Álgebra',
@@ -46,197 +110,174 @@ export const MATH_TOPICS: string[] = [
     'Sistemas lineares',
     'Álgebra Linear',
     'Vetores e espaços vetoriais',
-    'Combinações lineares e dependência',
-    'Matrizes e determinantes',
-    'Transformações lineares',
     'Autovalores e autovetores',
-    'Diagonalização e formas canônicas',
-    'Álgebra Abstrata (Moderna)',
+    'Diagonalização',
+    'Álgebra Abstrata',
     'Grupos, anéis e corpos',
-    'Homomorfismos e isomorfismos',
-    'Teoremas de Lagrange, Cauchy e Sylow',
-    'Geometria',
     'Geometria Euclidiana e Não-Euclidiana',
-    'Geometria Diferencial (Curvas e Superfícies)',
+    'Geometria Diferencial',
     'Topologia',
     'Cálculo e Análise',
     'Limites, Derivadas e Integrais',
-    'Equações Diferenciais Ordinárias e Parciais',
+    'Equações Diferenciais',
     'Séries de Fourier',
     'Análise Complexa',
     'Probabilidade e Estatística',
-    'Processos Estocásticos',
-    'Criptografia e Teoria da Informação',
-    'Otimização e Pesquisa Operacional'
+    'Criptografia',
+    'Otimização'
 ];
-
-// 2. CRITÉRIOS DE ANÁLISE (Usados nas iterações)
-export const ANALYSIS_TOPICS = [
-    { num: 0, name: 'TOPIC FOCUS', desc: 'Mantém o foco central sem desviar.' },
-    { num: 1, name: 'WRITING CLARITY', desc: 'Qualidade gramatical e legibilidade.' },
-    { num: 2, name: 'METHODOLOGICAL RIGOR', desc: 'Validez científica da metodologia.' },
-    { num: 3, name: 'ORIGINALITY', desc: 'Contribuição nova para a área.' },
-    { num: 4, name: 'LITERATURE REVIEW', desc: 'Uso adequado de fontes e contexto.' },
-    { num: 14, name: 'REFERENCES AND CITATIONS', desc: 'Formatação correta e relevância das fontes.' },
-    { num: 23, name: 'LATEX TECHNICAL ACCURACY', desc: 'Compilabilidade do código LaTeX.' },
-    { num: 28, name: 'PAGE COUNT COMPLIANCE', desc: 'Adesão ao número de páginas solicitado.' }
-];
-
-export const AVAILABLE_MODELS = [
-    { name: 'gemini-2.5-flash', description: 'Rápido (Análise e Títulos)' },
-    { name: 'gemini-2.5-pro', description: 'Poderoso (Escrita e Melhoria)' },
-];
-
-export const TOTAL_ITERATIONS = 12;
 ```
 
 ---
 
-## 3. Lógica Detalhada dos Serviços (`geminiService.ts`)
+## 3. Serviços de IA (`geminiService.ts`)
 
-### 3.1 Criação do Título
-
-A função recebe um tópico sorteado e solicita um título acadêmico específico.
+Este arquivo contém a lógica crítica de retry (429 quota), geração e análise.
 
 ```typescript
-export async function generatePaperTitle(topic: string, language: Language, model: string): Promise<string> {
-    const systemInstruction = `You are an expert mathematician. Your task is to generate a single, compelling, and high-impact title for a scientific paper.`;
-    
-    const userPrompt = `Based on the broad mathematical topic of "${topic}", generate a single, novel, and specific title for a high-impact research paper. 
-    
-    Requirements:
-    - Must sound like a genuine academic publication.
-    - Concise and impactful.
-    - Language: ${language}.
-    - Response MUST be ONLY the title text.`;
+import { GoogleGenAI, Type } from "@google/genai";
+import { LANGUAGES, AVAILABLE_MODELS, ANALYSIS_TOPICS } from '../constants';
+import { ARTICLE_TEMPLATE } from './articleTemplate';
 
-    const response = await callModel(model, systemInstruction, userPrompt);
-    return response.text.trim();
+const MAX_RETRIES = 5;
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+function getAiClient(): GoogleGenAI {
+    const apiKey = localStorage.getItem('gemini_api_key') || (process.env.API_KEY as string);
+    if (!apiKey) throw new Error("Gemini API key not found.");
+    return new GoogleGenAI({ apiKey });
 }
-```
 
-### 3.2 Geração Inicial
-
-```typescript
-export async function generateInitialPaper(title: string, language: Language, pageCount: number, model: string) {
-    // Prompt utiliza um template LaTeX fixo para garantir estrutura
-    const prompt = `Using the provided LaTeX template, write a complete paper titled "${title}". 
-    Target approx ${pageCount} pages. 
-    Use Google Search grounding to find real references.
-    Return ONLY valid LaTeX code.`;
-    
-    const response = await callModel(model, systemInstruction, prompt, { googleSearch: true });
-    return { paper: response.text, sources: response.groundingMetadata };
+async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            return await apiCall();
+        } catch (error: any) {
+            const msg = error.message?.toLowerCase() || '';
+            if (attempt === MAX_RETRIES || (msg.includes('limit: 0') || msg.includes('quota'))) {
+                // Se o limite for 0, não adianta tentar de novo.
+                if (msg.includes('limit: 0')) throw new Error("Este modelo não está disponível na sua conta (Quota = 0). Troque o modelo nas configurações.");
+                throw error;
+            }
+            // Backoff exponencial
+            await delay(Math.pow(2, attempt) * 1000 + 1000);
+        }
+    }
+    throw new Error("API call failed.");
 }
-```
 
-### 3.3 Análise (O Avaliador)
-
-```typescript
-export async function analyzePaper(paperContent: string, pageCount: number, model: string) {
-    const prompt = `Analyze this LaTeX paper based on these criteria: ${ANALYSIS_TOPICS.map(t => t.name)}. 
-    Return a JSON object: { "analysis": [{ "topicName": string, "score": number, "improvement": string }] }.`;
-    
-    // Usa responseSchema para garantir JSON válido
-    const response = await callModel(model, systemInstruction, [paperContent, prompt], { 
-        jsonOutput: true, 
-        responseSchema: schema 
-    });
-    return JSON.parse(response.text);
+async function callModel(model: string, sysParam: string, userParam: string, config: any = {}) {
+    const ai = getAiClient();
+    return withRateLimitHandling(() => ai.models.generateContent({
+        model,
+        contents: userParam,
+        config: {
+            systemInstruction: sysParam,
+            ...(config.jsonOutput && { responseMimeType: "application/json" }),
+            ...(config.responseSchema && { responseSchema: config.responseSchema }),
+            ...(config.googleSearch && { tools: [{ googleSearch: {} }] })
+        }
+    }));
 }
-```
 
-### 3.4 Melhoria (O Refinador)
+export async function generatePaperTitle(topic: string, language: string, model: string) {
+    const sys = "You are an expert mathematician. Generate a single, high-impact, novel research title.";
+    const user = `Topic: ${topic}. Language: ${language}. Return ONLY the title.`;
+    const res = await callModel(model, sys, user);
+    return res.text.trim().replace(/"/g, '');
+}
 
-```typescript
-export async function improvePaper(paperContent: string, analysisResult: AnalysisResult, language: string, model: string) {
-    const critiques = analysisResult.analysis
-        .filter(item => item.score < 8.5)
-        .map(item => `- **${item.topicName}**: ${item.improvement}`)
-        .join('\n');
+export async function generateInitialPaper(title: string, language: string, pages: number, model: string) {
+    const sys = "Write a complete LaTeX paper using the provided template.";
+    const user = `Title: ${title}. Pages: ${pages}. Language: ${language}. Use Google Search for references.\n\nTemplate:\n${ARTICLE_TEMPLATE}`;
+    const res = await callModel(model, sys, user, { googleSearch: true });
+    return { paper: res.text, sources: res.groundingMetadata };
+}
 
-    const prompt = `You are an expert editor. Improve the paper based strictly on these points:\n${critiques}\n\n
-    Current Paper:\n${paperContent}\n\n
-    Return the COMPLETE updated LaTeX code.`;
+export async function analyzePaper(paper: string, pages: number, model: string) {
+    const sys = "Analyze this LaTeX paper. Return JSON.";
+    const prompt = `Criteria: ${ANALYSIS_TOPICS.map(t => t.name)}. Page target: ${pages}.`;
+    const schema = {
+        type: Type.OBJECT,
+        properties: {
+            analysis: {
+                type: Type.ARRAY,
+                items: {
+                    type: Type.OBJECT,
+                    properties: {
+                        topicName: { type: Type.STRING },
+                        score: { type: Type.NUMBER },
+                        improvement: { type: Type.STRING }
+                    },
+                    required: ["topicName", "score", "improvement"]
+                }
+            }
+        }
+    };
+    const res = await callModel(model, sys, [paper, prompt], { jsonOutput: true, responseSchema: schema });
+    return JSON.parse(res.text);
+}
 
-    const response = await callModel(model, systemInstruction, prompt);
-    return response.text;
+export async function improvePaper(paper: string, analysis: any, language: string, model: string) {
+    const critiques = analysis.analysis.filter((i: any) => i.score < 8.5).map((i: any) => `- ${i.topicName}: ${i.improvement}`).join('\n');
+    const user = `Improve this paper based on:\n${critiques}\n\nPaper:\n${paper}\n\nReturn complete LaTeX.`;
+    const res = await callModel(model, "You are an expert editor.", user);
+    return res.text;
 }
 ```
 
 ---
 
-## 4. O Fluxo de Execução (`App.tsx`)
+## 4. Fluxo Principal (`App.tsx`)
 
-Este é o coração do programa, onde o loop de iterações acontece.
+Lógica de automação e integração com interface.
 
 ```tsx
 const handleFullAutomation = async () => {
-    // 1. Título
-    // Sorteia um tópico da lista detalhada
-    const randomTopic = MATH_TOPICS[Math.floor(Math.random() * MATH_TOPICS.length)];
-    const title = await generatePaperTitle(randomTopic, language, analysisModel);
+    // 1. Geração do Título
+    const topic = MATH_TOPICS[Math.floor(Math.random() * MATH_TOPICS.length)];
+    const title = await generatePaperTitle(topic, language, analysisModel);
     
-    // 2. Geração Inicial
+    // 2. Escrita Inicial
     let currentPaper = (await generateInitialPaper(title, language, pageCount, generationModel)).paper;
     
-    // 3. Loop de Iterações de Qualidade (Até 12 vezes)
-    for (let iter = 1; iter <= 12; iter++) {
-        // A. Analisa
+    // 3. Loop de Iteração
+    for (let i = 1; i <= 12; i++) {
         const analysis = await analyzePaper(currentPaper, pageCount, analysisModel);
+        // Salva estado para UI...
         
-        // B. Salva resultados para exibição
-        setAnalysisResults(prev => [...prev, { iteration: iter, results: analysis.analysis }]);
+        if (!analysis.analysis.some(a => a.score < 7.0)) break; // Early stop
         
-        // C. Critério de Parada Antecipada
-        // Se todas as notas forem >= 7.0, para imediatamente.
-        const hasLowScores = analysis.analysis.some(res => res.score < 7.0);
-        if (!hasLowScores) {
-            console.log("Qualidade alvo atingida.");
-            break;
-        }
-        
-        // D. Melhora (se não for a última iteração)
-        if (iter < 12) {
+        if (i < 12) {
             currentPaper = await improvePaper(currentPaper, analysis, language, generationModel);
         }
     }
     
-    // 4. Compilação Robusta (Tentativa e Erro com Auto-Fix)
-    await robustCompile(currentPaper);
+    // 4. Compilação Robusta (Auto-Fix)
+    try {
+        await compile(currentPaper);
+    } catch {
+        const fixed = await fixLatexPaper(currentPaper, FIX_OPTIONS, analysisModel);
+        await compile(fixed);
+    }
 };
 ```
 
----
+## 5. Compilação (Proxy)
 
-## 5. Template do Artigo (`articleTemplate.ts`)
+Função serverless para `functions/compile-latex.js` (Cloudflare/Netlify):
 
-```typescript
-export const ARTICLE_TEMPLATE = `\\documentclass[12pt,a4paper]{article}
-\\usepackage[utf8]{inputenc}
-\\usepackage{amsmath, amssymb, geometry}
-\\usepackage{hyperref}
-% O pacote Babel é injetado dinamicamente
-
-\\title{[INSERT NEW TITLE HERE]}
-\\author{SÉRGIO DE ANDRADE, PAULO \\\\ ORCID: 0009-0004-2555-3178}
-\\date{}
-
-\\begin{document}
-\\maketitle
-
-\\begin{abstract}
-[INSERT NEW COMPLETE ABSTRACT HERE]
-\\end{abstract}
-
-\\section{Introduction}
-[INSERT NEW CONTENT...]
-
-% ... Outras seções ...
-
-\\section{Referências}
-% Referências devem ser texto puro (\\noindent ... \\par), sem BibTeX complexo
-[INSERT NEW REFERENCE LIST HERE]
-
-\\end{document}`;
+```javascript
+export async function onRequestPost({ request }) {
+    const { latex } = await request.json();
+    const formData = new FormData();
+    formData.append('filecontents[]', latex);
+    formData.append('filename[]', 'document.tex');
+    formData.append('engine', 'pdflatex');
+    formData.append('return', 'pdf');
+    
+    const res = await fetch('https://texlive.net/cgi-bin/latexcgi', { method: 'POST', body: formData });
+    if (!res.ok) return new Response(JSON.stringify({ error: "Compile failed" }), { status: 400 });
+    return new Response(await res.arrayBuffer(), { status: 200 });
+}
 ```

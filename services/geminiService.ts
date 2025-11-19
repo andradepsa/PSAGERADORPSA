@@ -1,9 +1,8 @@
+
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Language, AnalysisResult, PaperSource, StyleGuide } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES } from '../constants';
 import { ARTICLE_TEMPLATE } from './articleTemplate'; // Import the single article template
-
-// Removed the global 'ai' instance. It will now be created on-demand.
 
 const BABEL_LANG_MAP: Record<Language, string> = {
     en: 'english',
@@ -33,6 +32,13 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
             console.warn(`API call failed on attempt ${attempt}.`, error);
             const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
             
+            // Check for hard failure (Quota limit: 0)
+            // This specifically handles the case where the user tries to use a model (like gemini-3)
+            // that isn't enabled or has 0 quota on their plan.
+            if (errorMessage.includes('limit: 0') || errorMessage.includes('quota exceeded for metric')) {
+                 throw new Error("API Quota Exceeded (Limit: 0). This model appears to be unavailable for your API key/Tier. Please select a different model (e.g., Gemini 2.5 Pro) in the settings.");
+            }
+
             if (attempt === MAX_RETRIES) {
                  if (errorMessage.includes('429') || errorMessage.includes('quota')) {
                     throw new Error("You exceeded your current quota. Please wait a minute before trying again. For higher limits, check your plan and billing details.");
@@ -146,7 +152,7 @@ async function callModel(
 export async function generatePaperTitle(topic: string, language: Language, model: string): Promise<string> {
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
 
-    const systemInstruction = `You are an expert mathematician and academic researcher with deep knowledge across all fields of mathematics. Your task is to generate a single, compelling, and high-impact title for a scientific paper.`;
+    const systemInstruction = `You are an expert mathematician and academic researcher. Your task is to generate a single, compelling, and high-impact title for a scientific paper.`;
     
     const userPrompt = `Based on the broad mathematical topic of "${topic}", generate a single, novel, and specific title for a high-impact research paper. 
     
