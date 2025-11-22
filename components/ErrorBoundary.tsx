@@ -1,14 +1,15 @@
-// FIX: Changed from destructured `Component` to `React.Component` to resolve type errors where `setState` and `props` were not found.
-import React, { ErrorInfo, ReactNode } from 'react';
+// FIX: Changed from destructured {Component} to React.Component to resolve type errors where setState and props were not found.
+// FIX: Switched to a namespace import for React to resolve potential type resolution issues with the component's properties and methods.
+import * as React from 'react';
 
 interface ErrorBoundaryProps {
-  children?: ReactNode;
+  children?: React.ReactNode;
 }
 
 interface ErrorBoundaryState {
   hasError: boolean;
   error: Error | null;
-  errorInfo: ErrorInfo | null;
+  errorInfo: React.ErrorInfo | null;
 }
 
 class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
@@ -23,7 +24,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
     return { hasError: true, error: error };
   }
 
-  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error("Uncaught error:", error, errorInfo);
     this.setState({
       error: error,

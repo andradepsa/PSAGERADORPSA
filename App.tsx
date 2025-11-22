@@ -288,7 +288,7 @@ const App: React.FC = () => {
             return;
         }
         setZenodoToken(storedToken);
-    
+
         isGenerationCancelled.current = false;
         setIsGenerating(true);
         setUploadStatus(null);
@@ -390,40 +390,51 @@ const App: React.FC = () => {
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : `Ocorreu um erro desconhecido no artigo ${i}.`;
                 console.error(`Error processing article ${i}:`, error);
-                
+
+                // Critical Error Handling: Stop automation on quota errors.
+                if (errorMessage.toLowerCase().includes('quota')) {
+                    setGenerationStatus(`🛑 Limite de cota da API atingido. A automação será pausada e reiniciada no próximo horário agendado.`);
+                    setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: 'upload_failed', latexCode: currentPaper, errorMessage: `Pausado por limite de cota: ${errorMessage}` }]);
+                    isGenerationCancelled.current = true; // Use this flag to signal a hard stop
+                    break; // Exit the loop immediately.
+                }
+
+                // Resilient Handling for other errors
                 const status = errorMessage.includes('compilação') ? 'compilation_failed' : 'upload_failed';
                 setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: status, latexCode: currentPaper, errorMessage: errorMessage }]);
                 
                 let pauseDuration = 3000;
-                if (errorMessage.toLowerCase().includes('quota')) {
-                    setGenerationStatus(`⚠️ Limite de cota da API atingido. Pausando por 5 minutos...`);
-                    pauseDuration = 300000;
-                } else if (errorMessage.toLowerCase().includes('network') || errorMessage.toLowerCase().includes('fetch')) {
+                if (errorMessage.toLowerCase().includes('network') || errorMessage.toLowerCase().includes('fetch')) {
                     setGenerationStatus(`🔌 Problema de rede detectado. Pausando por 1 minuto...`);
                     pauseDuration = 60000;
                 } else {
                      setGenerationStatus(`❌ Erro no artigo ${i}: ${errorMessage}. Continuando para o próximo em 3s...`);
                 }
                 await new Promise(resolve => setTimeout(resolve, pauseDuration));
-                continue;
+                continue; // Continue to the next article in the loop for non-quota errors
             }
         } // end for loop
 
+        setIsGenerating(false); // Stop generation state regardless of how the loop ended.
+
         if (isGenerationCancelled.current) {
-            setIsGenerating(false);
-            setGenerationStatus("❌ Automação cancelada pelo usuário.");
+            // Check if the stop was due to quota or manual cancellation
+            setGenerationStatus(prevStatus => {
+                if (prevStatus.includes('Limite de cota')) {
+                    return prevStatus; // Keep the quota message
+                }
+                return "❌ Automação cancelada pelo usuário."; // Default manual cancellation message
+            });
         } else if (isContinuousMode) {
             setGenerationStatus(`✅ Lote de ${articlesToProcess} artigos concluído. Iniciando próximo lote...`);
             setTimeout(() => {
+                // Double-check flags before re-starting
                 if (isContinuousMode && !isGenerationCancelled.current) {
                     handleFullAutomation(7);
-                } else {
-                    setIsGenerating(false);
-                    setGenerationStatus("✅ Automação Contínua Concluída.");
                 }
             }, 5000);
         } else {
-            setIsGenerating(false);
+            // This is for a normal, single batch completion
             setGenerationProgress(100);
             setGenerationStatus(`✅ Processo concluído! ${articlesToProcess} artigos processados.`);
             setStep(4);
