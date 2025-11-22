@@ -187,7 +187,7 @@ export async function generateInitialPaper(title: string, language: Language, pa
 1.  **Use the Provided Template:** You will be given a LaTeX template with placeholders like [INSERT ... HERE]. Your entire output MUST be the complete LaTeX document after filling in these placeholders with new, relevant content.
 2.  **Fill All Placeholders:** You must replace all placeholders with content appropriate for the new paper's title.
     -   \`[INSERT NEW TITLE HERE]\`: Replace with the new title.
-    -   \`[INSERT NEW COMPLETE ABSTRACT HERE]\`: Write a new abstract for the paper. This same abstract must be used in both the \`\\hypersetup{pdfsubject={...}}\` block and the \`\\begin{abstract}\` environment. The abstract text itself must not contain any LaTeX commands.
+    -   \`[INSERT NEW COMPLETE ABSTRACT HERE]\`: Write a new abstract for the paper in the \`\\begin{abstract}\` environment. The abstract text itself must not contain any LaTeX commands.
     -   \`[INSERT COMMA-SEPARATED KEYWORDS HERE]\`: Provide new keywords relevant to the title.
     -   \`[INSERT NEW CONTENT FOR ... SECTION HERE]\`: Write substantial, high-quality academic content for each section (Introduction, Literature Review, etc.) to generate a paper of approximately **${pageCount} pages**.
     -   \`[INSERT REFERENCE 1 HERE]\` through \`[INSERT REFERENCE ${referenceCount} HERE]\`: For each of these placeholders, generate a single, unique academic reference relevant to the title. Use Google Search grounding for this. Each generated reference must be a plain paragraph, for example, starting with \`\\noindent\` and ending with \`\\par\`. Do NOT use \`\\bibitem\` or \`thebibliography\`.
@@ -358,7 +358,7 @@ export async function fixLatexPaper(paperContent: string, compilationError: stri
     2.  Your task is to identify the root cause of the error and correct **ONLY** the necessary lines in the LaTeX code to resolve it.
     3.  **DO NOT** rewrite or refactor large sections of the document. Make the smallest change possible.
     4.  The entire output **MUST** be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) before \`\\documentclass\` or after \`\\end{document}\`.
-    5.  Maintain the exact LaTeX preamble, author information, title, and metadata structure as in the original.
+    5.  **Generally maintain the preamble, BUT if the compilation error is directly related to the preamble (e.g., \\hypersetup, package conflicts, or metadata), you MUST fix it by simplifying or correcting the faulty command.**
     6.  **DO NOT** use commands like \`\\begin{thebibliography}\`, \`\\bibitem\`, or \`\\cite{}\`.
     7.  **DO NOT** add or remove \`\\newpage\` commands.
     8.  **DO NOT** include any images, figures, or complex tables.

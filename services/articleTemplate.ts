@@ -1,3 +1,4 @@
+
 // services/articleTemplate.ts
 
 export const ARTICLE_TEMPLATE = `\\documentclass[12pt,a4paper]{article}
@@ -9,9 +10,7 @@ export const ARTICLE_TEMPLATE = `\\documentclass[12pt,a4paper]{article}
 
 \\hypersetup{
   pdftitle={[INSERT NEW TITLE HERE]},
-  pdfauthor={SÉRGIO DE ANDRADE, PAULO},
-  pdfsubject={[INSERT NEW COMPLETE ABSTRACT HERE]},
-  pdfkeywords={[INSERT COMMA-SEPARATED KEYWORDS HERE]}
+  pdfauthor={SÉRGIO DE ANDRADE, PAULO}
 }
 
 \\title{[INSERT NEW TITLE HERE]}
@@ -62,4 +61,4 @@ export const ARTICLE_TEMPLATE = `\\documentclass[12pt,a4paper]{article}
 % CRITICAL: Absolutely DO NOT use \\begin{thebibliography} or \\bibitem.
 [INSERT NEW REFERENCE LIST HERE]
 
-\\end{document}`
+\\end{document}`;
