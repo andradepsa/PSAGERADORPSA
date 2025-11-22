@@ -196,7 +196,8 @@ export async function generateInitialPaper(title: string, language: Language, pa
 4.  **Language:** The entire paper must be written in **${languageName}**.
 5.  **Output Format:** The entire output MUST be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) around the LaTeX code.
 6.  **CRITICAL: References generated MUST NOT contain any URLs or web links. Format them as academic citations only, without any \\url{} commands or direct links.**
-7.  **CRITICAL:** Do NOT place the abstract or keywords inside the \`\\hypersetup{...}\` command. Keep \`\\hypersetup\` simple (only title and author). Putting complex text in metadata fields causes compilation errors.`;
+7.  **CRITICAL:** Do NOT place the abstract or keywords inside the \`\\hypersetup{...}\` command. Keep \`\\hypersetup\` simple (only title and author). Putting complex text in metadata fields causes compilation errors.
+8.  **CRITICAL: You MUST properly escape all special LaTeX characters in the entire document, especially in the reference list. For example, the ampersand character '&' must be written as '\\&'.**`;
 
     // Dynamically insert the babel package and reference placeholders into the template for the prompt
     const templateWithBabel = ARTICLE_TEMPLATE.replace(
@@ -367,6 +368,7 @@ export async function fixLatexPaper(paperContent: string, compilationError: stri
     9.  **DO NOT** include any images, figures, or complex tables.
     10. **CRITICAL:** Ensure that no URLs are present in the references section.
     11. Return only the corrected LaTeX source code.
+    12. **Common errors include unescaped special characters like '&' (should be '\\&'), '%' (should be '\\%'), and '_' (should be '\\_'). Pay close attention to these, especially in the bibliography/references section, as this is a frequent cause of the "Misplaced alignment tab character" error.**
     `;
 
     const userPrompt = `The following LaTeX document failed to compile. Analyze the error message and the code, then provide the complete, corrected LaTeX source code.
