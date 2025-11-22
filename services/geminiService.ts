@@ -195,13 +195,14 @@ export async function generateInitialPaper(title: string, language: Language, pa
 3.  **Strictly Adhere to Structure:** Do NOT modify the LaTeX structure provided in the template. Do not add or remove packages, change the author information, or alter the section commands. The only exception is adding the correct babel package for the language.
 4.  **Language:** The entire paper must be written in **${languageName}**.
 5.  **Output Format:** The entire output MUST be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) around the LaTeX code.
-6.  **CRITICAL RULE - CHARACTER ESCAPING:** You **MUST** properly escape all special LaTeX characters in the entire document. This is the most common cause of compilation failure.
-    -   The ampersand character '&' **MUST** be written as \`\\&\`.
+6.  **CRITICAL RULE - AVOID AMPERSAND:** To prevent compilation errors, you **MUST NOT** use the ampersand character ('&').
+    -   In the bibliography/reference section, use the word 'and' to separate author names.
     -   **Example (Incorrect):** "Smith, J. & Doe, J."
-    -   **Example (Correct):** "Smith, J. \\& Doe, J."
-    -   Double-check your output, especially the reference list, for unescaped '&' characters.
-7.  **CRITICAL RULE - NO URLs:** References must **NOT** contain any URLs or web links. Format them as academic citations only, without any \`\\url{}\` commands.
-8.  **CRITICAL RULE - METADATA:** Do NOT place complex content inside the \`\\hypersetup{...}\` command. Only the title and author should be there.
+    -   **Example (Correct):** "Smith, J. and Doe, J."
+    -   In the main body of the text, prefer using 'and'. If you absolutely must use an ampersand, you must escape it as \`\\&\`.
+7.  **CRITICAL RULE - OTHER CHARACTERS:** You must also properly escape other special LaTeX characters like '%', '$', '#', '_', '{', '}'. For example, an underscore must be written as \`\\_\`.
+8.  **CRITICAL RULE - NO URLs:** References must **NOT** contain any URLs or web links. Format them as academic citations only, without any \`\\url{}\` commands.
+9.  **CRITICAL RULE - METADATA:** Do NOT place complex content inside the \`\\hypersetup{...}\` command. Only the title and author should be there.
 `;
 
     // Dynamically insert the babel package and reference placeholders into the template for the prompt
@@ -332,7 +333,7 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     -   Apply the necessary changes directly to the LaTeX source code to address each improvement point.
     -   Ensure that the scientific content remains accurate and coherent.
     -   Maintain the exact LaTeX preamble, author information, title, and metadata structure as in the original. Do NOT change \\documentclass, \\usepackage, \\hypersetup, \\title, \\author, \\date, \\maketitle.
-    -   The entire output MUST be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex) before \`\\documentclass\` or after \`\\end{document}\`.
+    -   The entire output MUST be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) before \`\\documentclass\` or after \`\\end{document}\`.
     -   The language of the entire paper must remain in **${languageName}**.
     -   **CRITICAL: Absolutely DO NOT use the \`\\begin{thebibliography}\`, \`\\end{thebibliography}\`, or \`\\bibitem\` commands anywhere in the document. The references MUST be formatted as a plain, unnumbered list directly following \`\\section{Referências}\`.**
     -   **Do NOT use the \`\\cite{}\` command anywhere in the text.**
@@ -363,7 +364,7 @@ export async function fixLatexPaper(paperContent: string, compilationError: stri
     2.  Your task is to identify the root cause of the error and correct **ONLY** the necessary lines in the LaTeX code to resolve it.
     3.  **DO NOT** rewrite or refactor large sections of the document. Make the smallest change possible.
     4.  The entire output **MUST** be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) before \`\\documentclass\` or after \`\\end{document}\`.
-    5.  **HIGHEST PRIORITY:** If the error message is "Misplaced alignment tab character &", the problem is almost certainly an unescaped ampersand ('&') in the reference list. Your primary action MUST be to find every instance of '&' in the \`\\section{Referências}\` and replace it with \`\\&\`.
+    5.  **HIGHEST PRIORITY:** If the error message is "Misplaced alignment tab character &", the problem is an unescaped ampersand ('&'). Your primary action MUST be to find every instance of '&' and replace it with the word 'and', especially in the reference list. Example Fix: Change "Bondal, A., & Orlov, D." to "Bondal, A., and Orlov, D.".
     6.  Generally maintain the preamble, BUT if the compilation error is directly related to the preamble (especially the \\hypersetup command or metadata), you MUST fix it by removing the problematic fields.
     7.  **DO NOT** use commands like \`\\begin{thebibliography}\`, \`\\bibitem\`, or \`\\cite{}\`.
     8.  **DO NOT** add or remove \`\\newpage\` commands.
