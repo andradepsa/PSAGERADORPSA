@@ -1,4 +1,5 @@
 
+
 // services/articleTemplate.ts
 
 export const ARTICLE_TEMPLATE = `\\documentclass[12pt,a4paper]{article}
@@ -11,6 +12,8 @@ export const ARTICLE_TEMPLATE = `\\documentclass[12pt,a4paper]{article}
 \\hypersetup{
   pdftitle={[INSERT NEW TITLE HERE]},
   pdfauthor={SÉRGIO DE ANDRADE, PAULO}
+  % CRITICAL: DO NOT ADD pdfsubject OR pdfkeywords HERE.
+  % Adding complex text to hypersetup causes compilation errors.
 }
 
 \\title{[INSERT NEW TITLE HERE]}

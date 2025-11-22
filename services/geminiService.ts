@@ -1,4 +1,5 @@
 
+
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Language, AnalysisResult, PaperSource, StyleGuide } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES } from '../constants';
@@ -194,7 +195,8 @@ export async function generateInitialPaper(title: string, language: Language, pa
 3.  **Strictly Adhere to Structure:** Do NOT modify the LaTeX structure provided in the template. Do not add or remove packages, change the author information, or alter the section commands. The only exception is adding the correct babel package for the language.
 4.  **Language:** The entire paper must be written in **${languageName}**.
 5.  **Output Format:** The entire output MUST be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) around the LaTeX code.
-6.  **CRITICAL: References generated MUST NOT contain any URLs or web links. Format them as academic citations only, without any \\url{} commands or direct links.**`;
+6.  **CRITICAL: References generated MUST NOT contain any URLs or web links. Format them as academic citations only, without any \\url{} commands or direct links.**
+7.  **CRITICAL:** Do NOT place the abstract or keywords inside the \`\\hypersetup{...}\` command. Keep \`\\hypersetup\` simple (only title and author). Putting complex text in metadata fields causes compilation errors.`;
 
     // Dynamically insert the babel package and reference placeholders into the template for the prompt
     const templateWithBabel = ARTICLE_TEMPLATE.replace(
@@ -358,12 +360,13 @@ export async function fixLatexPaper(paperContent: string, compilationError: stri
     2.  Your task is to identify the root cause of the error and correct **ONLY** the necessary lines in the LaTeX code to resolve it.
     3.  **DO NOT** rewrite or refactor large sections of the document. Make the smallest change possible.
     4.  The entire output **MUST** be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) before \`\\documentclass\` or after \`\\end{document}\`.
-    5.  **Generally maintain the preamble, BUT if the compilation error is directly related to the preamble (e.g., \\hypersetup, package conflicts, or metadata), you MUST fix it by simplifying or correcting the faulty command.**
-    6.  **DO NOT** use commands like \`\\begin{thebibliography}\`, \`\\bibitem\`, or \`\\cite{}\`.
-    7.  **DO NOT** add or remove \`\\newpage\` commands.
-    8.  **DO NOT** include any images, figures, or complex tables.
-    9.  **CRITICAL:** Ensure that no URLs are present in the references section.
-    10. Return only the corrected LaTeX source code.
+    5.  **Generally maintain the preamble, BUT if the compilation error is directly related to the preamble (especially the \\hypersetup command or metadata), you MUST fix it by removing the problematic fields.**
+    6.  **CRITICAL: Check the \\hypersetup{...} command. If it contains 'pdfsubject' or 'pdfkeywords', REMOVE these lines entirely. They cause compilation errors.**
+    7.  **DO NOT** use commands like \`\\begin{thebibliography}\`, \`\\bibitem\`, or \`\\cite{}\`.
+    8.  **DO NOT** add or remove \`\\newpage\` commands.
+    9.  **DO NOT** include any images, figures, or complex tables.
+    10. **CRITICAL:** Ensure that no URLs are present in the references section.
+    11. Return only the corrected LaTeX source code.
     `;
 
     const userPrompt = `The following LaTeX document failed to compile. Analyze the error message and the code, then provide the complete, corrected LaTeX source code.

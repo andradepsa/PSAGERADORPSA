@@ -188,6 +188,9 @@ const App: React.FC = () => {
         onStatusUpdate: (message: string) => void
     ): Promise<{ pdfFile: File; pdfUrl: string; finalCode: string; }> => {
         try {
+            console.group("🔍 DEBUG: Starting Robust Compile");
+            console.log("Original Code Length:", codeToCompile.length);
+            
             const MAX_COMPILE_ATTEMPTS = 3;
             let lastError: Error | null = null;
 
@@ -195,6 +198,8 @@ const App: React.FC = () => {
             for (let attempt = 1; attempt <= MAX_COMPILE_ATTEMPTS; attempt++) {
                 try {
                     onStatusUpdate(`⏳ Compilando (Tentativa ${attempt}/${MAX_COMPILE_ATTEMPTS})...`);
+                    console.log(`Attempt ${attempt}: Sending request to /compile-latex`);
+                    
                     const response = await fetch('/compile-latex', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -203,14 +208,17 @@ const App: React.FC = () => {
 
                     if (!response.ok) {
                         const errorData = await response.json();
+                        console.error(`Attempt ${attempt} FAILED. Server error:`, errorData);
                         throw new Error(errorData.error || `Falha na compilação (tentativa ${attempt}).`);
                     }
                     
                     const base64Pdf = await response.text();
+                    console.log(`Attempt ${attempt} SUCCESS. PDF received.`);
                     const pdfUrl = `data:application/pdf;base64,${base64Pdf}`;
                     const blob = await (await fetch(pdfUrl)).blob();
                     const file = new File([blob], "paper.pdf", { type: "application/pdf" });
                     
+                    console.groupEnd();
                     return { pdfFile: file, pdfUrl, finalCode: codeToCompile };
 
                 } catch (error) {
@@ -225,6 +233,8 @@ const App: React.FC = () => {
             // --- Part 2: Automatic Fix and Final Attempt ---
             if (lastError) {
                 onStatusUpdate(`⚠️ Compilação falhou. Tentando corrigir o código com IA...`);
+                console.log("Initiating AI Fix...");
+                console.log("Error Reason:", lastError.message);
                 
                 let fixedCode = '';
                 try {
@@ -233,8 +243,10 @@ const App: React.FC = () => {
                         lastError.message,
                         analysisModel // Use the faster model for fixing
                     );
+                    console.log("AI Fix Generated. New Code Length:", fixedCode.length);
                 } catch (fixError) {
                     const fixErrorMessage = fixError instanceof Error ? fixError.message : String(fixError);
+                    console.error("AI Fix Failed:", fixErrorMessage);
                     throw new Error(`A compilação falhou e a tentativa de correção automática também falhou. Erro original: ${lastError.message}. Erro da correção: ${fixErrorMessage}`);
                 }
 
@@ -248,6 +260,7 @@ const App: React.FC = () => {
 
                     if (!response.ok) {
                         const errorData = await response.json();
+                        console.error("Final Compilation Failed:", errorData);
                         throw new Error(errorData.error || 'A compilação final falhou mesmo após a correção automática.');
                     }
 
@@ -256,15 +269,20 @@ const App: React.FC = () => {
                     const blob = await (await fetch(pdfUrl)).blob();
                     const file = new File([blob], "paper.pdf", { type: "application/pdf" });
 
+                    console.groupEnd();
                     return { pdfFile: file, pdfUrl, finalCode: fixedCode };
                     
                 } catch (finalCompileError) {
                     const finalErrorMessage = finalCompileError instanceof Error ? finalCompileError.message : String(finalCompileError);
+                    console.error("Final Error:", finalErrorMessage);
+                    console.groupEnd();
                     throw new Error(`A compilação falhou após a correção automática. Erro final: ${finalErrorMessage}`);
                 }
             }
+            console.groupEnd();
             throw new Error("Falha na compilação após todas as tentativas.");
         } catch(error) {
+            console.groupEnd();
             throw error; // Re-throw the error to be handled by the calling function
         }
     };
