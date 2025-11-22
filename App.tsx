@@ -191,6 +191,11 @@ const App: React.FC = () => {
             console.group("🔍 DEBUG: Starting Robust Compile");
             console.log("Original Code Length:", codeToCompile.length);
             
+            // --- EXPLICIT LOGGING FOR USER DEBUG ---
+            console.log("👇👇👇 FULL LATEX CODE BELOW 👇👇👇");
+            console.log(codeToCompile);
+            console.log("👆👆👆 FULL LATEX CODE ABOVE 👆👆👆");
+            
             const MAX_COMPILE_ATTEMPTS = 3;
             let lastError: Error | null = null;
 
@@ -209,6 +214,7 @@ const App: React.FC = () => {
                     if (!response.ok) {
                         const errorData = await response.json();
                         console.error(`Attempt ${attempt} FAILED. Server error:`, errorData);
+                        // The errorData.error now contains the full log from the server function
                         throw new Error(errorData.error || `Falha na compilação (tentativa ${attempt}).`);
                     }
                     
@@ -234,16 +240,22 @@ const App: React.FC = () => {
             if (lastError) {
                 onStatusUpdate(`⚠️ Compilação falhou. Tentando corrigir o código com IA...`);
                 console.log("Initiating AI Fix...");
-                console.log("Error Reason:", lastError.message);
+                console.log("Error Reason (Full Log sent to AI):", lastError.message);
                 
                 let fixedCode = '';
                 try {
                     fixedCode = await fixLatexPaper(
                         codeToCompile, 
-                        lastError.message,
+                        lastError.message, // Passing the full log to the AI
                         analysisModel // Use the faster model for fixing
                     );
                     console.log("AI Fix Generated. New Code Length:", fixedCode.length);
+                    
+                    // Debug the fixed code too
+                    console.log("👇👇👇 FIXED LATEX CODE BELOW 👇👇👇");
+                    console.log(fixedCode);
+                    console.log("👆👆👆 FIXED LATEX CODE ABOVE 👆👆👆");
+
                 } catch (fixError) {
                     const fixErrorMessage = fixError instanceof Error ? fixError.message : String(fixError);
                     console.error("AI Fix Failed:", fixErrorMessage);

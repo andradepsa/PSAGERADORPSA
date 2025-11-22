@@ -1,3 +1,4 @@
+
 /**
  * Cloudflare Pages Function to proxy LaTeX compilation requests to TeXLive.net.
  * This is necessary to bypass browser CORS (Cross-Origin Resource Sharing) restrictions.
@@ -44,14 +45,16 @@ export async function onRequestPost(context) {
             const errorLogHtml = await texliveResponse.text();
             console.error(`TeXLive.net compilation failed. Status: ${texliveResponse.status}.`);
 
+            // Try to extract the log from the <pre> tag which latexcgi usually returns
             const logMatch = errorLogHtml.match(/<pre>([\s\S]*?)<\/pre>/);
-            let detailedError = "Compilation failed. The TeXLive.net server did not return a PDF. Please check the LaTeX code for errors.";
+            let detailedError = "Compilation failed. The TeXLive.net server did not return a PDF.";
+            
             if (logMatch && logMatch[1]) {
-                const logText = logMatch[1];
-                const errorLineMatch = logText.match(/^!.*$/m);
-                if (errorLineMatch) {
-                    detailedError = `TeX Error: ${errorLineMatch[0].trim().substring(0, 250)}`;
-                }
+                // Return a generous chunk of the log so the AI can analyze it
+                detailedError = `TeX Live Error Log:\n${logMatch[1].substring(0, 3000)}`; 
+            } else {
+                // Fallback: return the raw HTML (truncated)
+                detailedError = `Compilation failed. Upstream response:\n${errorLogHtml.substring(0, 1000)}`;
             }
             
             return new Response(JSON.stringify({ error: detailedError }), {
