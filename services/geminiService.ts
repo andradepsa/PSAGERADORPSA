@@ -350,26 +350,34 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     return paper;
 }
 
-export async function fixLatexPaper(paperContent: string, fixesToApply: { key: string; label: string; description: string }[], model: string): Promise<string> {
-    const fixInstructions = fixesToApply.map(fix => `**${fix.label}**: ${fix.description}`).join('\n- ');
+export async function fixLatexPaper(paperContent: string, compilationError: string, model: string): Promise<string> {
+    const systemInstruction = `You are an expert LaTeX editor AI. Your task is to fix a compilation error in a given LaTeX document. You must be extremely precise and surgical in your changes to avoid introducing new errors.
 
-    const systemInstruction = `You are an expert LaTeX editor AI. Your task is to fix common compilation and formatting issues in a given LaTeX document based on specific instructions.
-
-    **Instructions for Fixing:**
-    -   You will receive the full LaTeX source code of a paper.
-    -   You MUST apply the following specific fixes to the document:
-        -   ${fixInstructions}
-    -   The entire output MUST be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex) before \`\\documentclass\` or after \`\\end{document}\`.
-    -   Maintain the exact LaTeX preamble, author information, title, and metadata structure as in the original. Do NOT change \\documentclass, \\usepackage, \\hypersetup, \\title, \\author, \\date, \\maketitle.
-    -   **CRITICAL: Absolutely DO NOT use the \`\\begin{thebibliography}\`, \`\\end{thebibliography}\`, or \`\\bibitem\` commands anywhere in the document. The references MUST be formatted as a plain, unnumbered list directly following \`\\section{Referências}\`.**
-    -   **Do NOT use the \`\\cite{}\` command anywhere in the text.**
-    -   **Do NOT add or remove \`\\newpage\` commands. Let the LaTeX engine handle page breaks automatically.**
-    -   **Do NOT include any images, figures, organograms, flowcharts, diagrams, or complex tables in the fixed paper.**
-    -   **CRITICAL: Ensure that no URLs or web links are present in the references section. All references must be formatted as academic citations only, without any \\url{} commands or direct links.**
-    -   Return only the corrected LaTeX source code.
+    **CRITICAL INSTRUCTIONS:**
+    1.  You will receive the full LaTeX source code of a paper and the specific error message from the compiler.
+    2.  Your task is to identify the root cause of the error and correct **ONLY** the necessary lines in the LaTeX code to resolve it.
+    3.  **DO NOT** rewrite or refactor large sections of the document. Make the smallest change possible.
+    4.  The entire output **MUST** be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) before \`\\documentclass\` or after \`\\end{document}\`.
+    5.  Maintain the exact LaTeX preamble, author information, title, and metadata structure as in the original.
+    6.  **DO NOT** use commands like \`\\begin{thebibliography}\`, \`\\bibitem\`, or \`\\cite{}\`.
+    7.  **DO NOT** add or remove \`\\newpage\` commands.
+    8.  **DO NOT** include any images, figures, or complex tables.
+    9.  **CRITICAL:** Ensure that no URLs are present in the references section.
+    10. Return only the corrected LaTeX source code.
     `;
 
-    const userPrompt = `Current LaTeX Paper:\n\n${paperContent}\n\nApply the specified fixes and provide the complete, corrected LaTeX source code.`;
+    const userPrompt = `The following LaTeX document failed to compile. Analyze the error message and the code, then provide the complete, corrected LaTeX source code.
+
+**Compilation Error Message:**
+\`\`\`
+${compilationError}
+\`\`\`
+
+**Full LaTeX Document with Error:**
+\`\`\`latex
+${paperContent}
+\`\`\`
+`;
 
     const response = await callModel(model, systemInstruction, userPrompt);
     let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');

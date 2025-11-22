@@ -68,7 +68,7 @@ const ZenodoUploader = forwardRef<ZenodoUploaderRef, ZenodoUploaderProps>(({
             const dep_res = await fetch(`${ZENODO_API_URL}/deposit/depositions`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${zenodoToken}` },
-                body: JSON.stringify({ metadata: {} })
+                body: JSON.stringify({})
             });
 
             if (!dep_res.ok) {
@@ -111,7 +111,7 @@ const ZenodoUploader = forwardRef<ZenodoUploaderRef, ZenodoUploaderProps>(({
                     creators: authors.filter(a => a.name).map(author => ({
                         name: author.name,
                         // Affiliation is intentionally omitted as requested for the Zenodo submission.
-                        orcid: author.orcid
+                        orcid: author.orcid || undefined
                     })),
                     keywords: keywords.split(',').map(k => k.trim()).filter(k => k.length > 0)
                 }

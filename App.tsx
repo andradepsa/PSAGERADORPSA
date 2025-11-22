@@ -230,7 +230,7 @@ const App: React.FC = () => {
                 try {
                     fixedCode = await fixLatexPaper(
                         codeToCompile, 
-                        FIX_OPTIONS, // Use all available fix options
+                        lastError.message,
                         analysisModel // Use the faster model for fixing
                     );
                 } catch (fixError) {
