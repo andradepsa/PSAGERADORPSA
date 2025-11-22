@@ -1,75 +1,51 @@
 # PROMPT MESTRE: RECRIAÇÃO DO GERADOR DE ARTIGOS CIENTÍFICOS
 
-**Instrução para a IA:**
-Você deve atuar como um Engenheiro de Software Sênior e recriar uma aplicação web completa baseada nas especificações e códigos abaixo. O objetivo é um sistema robusto de geração, análise e publicação de artigos científicos usando React, Google Gemini e LaTeX.
+**Instrução para a IA (Copie e cole isso):**
+
+Você deve atuar como um Engenheiro de Software Sênior e recriar uma aplicação web completa chamada "Gerador de Artigos Científicos". O coração deste sistema é um motor de iteração robusto que simula uma revisão por pares (peer review) acadêmica.
 
 ---
 
-## 1. Estrutura do Projeto e Dependências
+## 1. Visão Geral do Sistema
 
-**Stack:**
-- React 19
-- TypeScript
-- Vite
-- TailwindCSS
-- @google/genai (SDK v1.25.0+)
-- Ace Editor (via CDN ou react-ace) para edição de LaTeX
+O aplicativo gera artigos científicos completos em LaTeX a partir de um tópico matemático.
+**Diferencial:** Não é apenas "one-shot". Ele gera um rascunho e depois entra em um loop de **12 iterações de análise e melhoria**, avaliando o texto contra 28 critérios rigorosos.
 
-**Dependências (package.json):**
-```json
-{
-  "dependencies": {
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "@google/genai": "^1.25.0"
-  },
-  "devDependencies": {
-    "vite": "^6.2.0",
-    "@vitejs/plugin-react": "^5.0.0",
-    "typescript": "~5.8.2",
-    "@types/node": "^22.14.0"
-  }
-}
-```
+**Stack Tecnológico:**
+- Frontend: React 19, TypeScript, Vite.
+- IA: Google Gemini (Modelos `gemini-2.5-flash` para análise e `gemini-2.5-pro` para escrita).
+- Estilização: TailwindCSS.
+- Compilação: Proxy para TeXLive.net.
 
 ---
 
-## 2. Dados e Constantes (`constants.ts`)
+## 2. O Motor de Iterações (Core Logic)
 
-Este arquivo contém a lista expandida de tópicos para garantir variedade e os critérios de análise.
+A IA deve implementar o seguinte fluxo de repetição (`for loop` de 1 a 12):
+
+### Passo A: O Analista (The Critic)
+A cada iteração, envie o código LaTeX atual para a IA (modelo rápido/flash) junto com a lista de **28 Tópicos de Análise** (veja seção 3).
+A IA deve retornar um JSON estruturado contendo, para cada tópico:
+1.  `score` (0.0 a 10.0).
+2.  `improvement` (Instrução específica de correção).
+
+### Passo B: O Filtro (The Gatekeeper)
+O código deve verificar as notas.
+- **Critério de Parada (Early Stop):** Se TODOS os scores forem >= 7.0, o loop deve ser interrompido imediatamente ("O artigo está pronto").
+- Se houver scores baixos, filtre apenas os tópicos com `score < 8.5` para enviar para a etapa de melhoria.
+
+### Passo C: O Editor (The Fixer)
+Envie o código LaTeX e **apenas as críticas filtradas** para a IA (modelo pro).
+Prompt: *"Você é um editor acadêmico. Corrija o artigo seguindo estritamente estas instruções de melhoria: [LISTA DE CRÍTICAS]. Mantenha o restante inalterado."*
+
+---
+
+## 3. Lista Crítica de Análise (Constantes)
+
+O sistema **DEVE** utilizar exatamente esta lista de critérios para garantir a robustez da avaliação.
 
 ```typescript
-import type { LanguageOption, AnalysisTopic, StyleGuideOption } from './types';
-
-export const TOTAL_ITERATIONS = 12;
-
-export const LANGUAGES: LanguageOption[] = [
-    { code: 'en', name: 'English', flag: '🇬🇧' },
-    { code: 'pt', name: 'Português', flag: '🇧🇷' },
-    { code: 'es', name: 'Español', flag: '🇪🇸' },
-    { code: 'fr', name: 'Français', flag: '🇫🇷' },
-];
-
-export const AVAILABLE_MODELS = [
-    { name: 'gemini-2.5-flash', description: 'Fast and efficient (Recommended for Analysis)' },
-    { name: 'gemini-2.5-pro', description: 'High intelligence (Recommended for Writing)' },
-    { name: 'gemini-3-pro-preview', description: 'Next-gen reasoning (Experimental/Limited Quota)' },
-];
-
-export const STYLE_GUIDES: StyleGuideOption[] = [
-    { key: 'abnt', name: 'ABNT', description: 'Associação Brasileira de Normas Técnicas' },
-    { key: 'apa', name: 'APA', description: 'American Psychological Association 7th Ed.' },
-    { key: 'mla', name: 'MLA', description: 'Modern Language Association 9th Ed.' },
-    { key: 'ieee', name: 'IEEE', description: 'Institute of Electrical and Electronics Engineers' },
-];
-
-export const FIX_OPTIONS = [
-    { key: 'escape_chars', label: 'Fix Character Escaping', description: 'Fixes unescaped %, $, _, &.' },
-    { key: 'citation_mismatch', label: 'Fix Citation Mismatches', description: 'Matches \\cite{} with references.' },
-    { key: 'preamble_check', label: 'Verify Preamble', description: 'Ensures required packages are loaded.' }
-];
-
-export const ANALYSIS_TOPICS: AnalysisTopic[] = [
+export const ANALYSIS_TOPICS = [
     { num: 0, name: 'TOPIC FOCUS', desc: 'Mantém o foco central sem desviar.' },
     { num: 1, name: 'WRITING CLARITY', desc: 'Qualidade gramatical e legibilidade.' },
     { num: 2, name: 'METHODOLOGICAL RIGOR', desc: 'Validez científica da metodologia.' },
@@ -85,199 +61,45 @@ export const ANALYSIS_TOPICS: AnalysisTopic[] = [
     { num: 12, name: 'COHERENCE AND FLOW', desc: 'Transições suaves entre seções.' },
     { num: 13, name: 'STRUCTURE', desc: 'Organização geral do LaTeX.' },
     { num: 14, name: 'REFERENCES', desc: 'Formatação e relevância.' },
+    { num: 15, name: 'SCOPE AND BOUNDARIES', desc: 'Definição clara do escopo.' },
+    { num: 16, name: 'SCIENTIFIC HONESTY', desc: 'Transparência e evitar plágio.' },
+    { num: 17, name: 'TITLE-CONTENT ALIGNMENT', desc: 'Alinhamento entre título e conteúdo.' },
+    { num: 18, name: 'STATEMENT OF LIMITATIONS', desc: 'Reconhecimento de limitações.' },
+    { num: 20, name: 'PRACTICAL IMPLICATIONS', desc: 'Relevância prática.' },
+    { num: 21, name: 'TERMINOLOGY', desc: 'Uso correto de termos técnicos.' },
+    { num: 22, name: 'ETHICAL CONSIDERATIONS', desc: 'Considerações éticas.' },
     { num: 23, name: 'LATEX ACCURACY', desc: 'Compilabilidade técnica.' },
+    { num: 24, name: 'STRATEGIC REFINEMENT', desc: 'Melhorias cirúrgicas sem quebrar o texto.' },
+    { num: 25, name: 'THEORETICAL FOUNDATION', desc: 'Base teórica sólida.' },
+    { num: 26, name: 'SCIENTIFIC CONTENT ACCURACY', desc: 'Precisão das informações científicas.' },
+    { num: 27, name: 'DEPTH OF CRITICAL ANALYSIS', desc: 'Profundidade da análise crítica.' },
     { num: 28, name: 'PAGE COUNT', desc: 'Adesão ao tamanho solicitado.' }
 ];
-
-export const MATH_TOPICS: string[] = [
-    'Fundamentos da Matemática',
-    'Lógica Matemática',
-    'Proposições e conectivos lógicos',
-    'Tabelas-verdade e equivalências',
-    'Argumentos e deduções válidas',
-    'Quantificadores (∀, ∃)',
-    'Teoria dos Conjuntos',
-    'Conjuntos e operações',
-    'Relações e funções',
-    'Cardinalidade e infinitos',
-    'Paradoxo de Russell',
-    'Axiomas de Zermelo–Fraenkel',
-    'Teoria dos Números',
-    'Axiomas de Peano',
-    'Aritmética modular',
-    'Álgebra',
-    'Polinômios e fatoração',
-    'Sistemas lineares',
-    'Álgebra Linear',
-    'Vetores e espaços vetoriais',
-    'Autovalores e autovetores',
-    'Diagonalização',
-    'Álgebra Abstrata',
-    'Grupos, anéis e corpos',
-    'Geometria Euclidiana e Não-Euclidiana',
-    'Geometria Diferencial',
-    'Topologia',
-    'Cálculo e Análise',
-    'Limites, Derivadas e Integrais',
-    'Equações Diferenciais',
-    'Séries de Fourier',
-    'Análise Complexa',
-    'Probabilidade e Estatística',
-    'Criptografia',
-    'Otimização'
-];
 ```
 
 ---
 
-## 3. Serviços de IA (`geminiService.ts`)
+## 4. Compilação Robusta e Auto-Fix
 
-Este arquivo contém a lógica crítica de retry (429 quota), geração e análise.
-
-```typescript
-import { GoogleGenAI, Type } from "@google/genai";
-import { LANGUAGES, AVAILABLE_MODELS, ANALYSIS_TOPICS } from '../constants';
-import { ARTICLE_TEMPLATE } from './articleTemplate';
-
-const MAX_RETRIES = 5;
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-function getAiClient(): GoogleGenAI {
-    const apiKey = localStorage.getItem('gemini_api_key') || (process.env.API_KEY as string);
-    if (!apiKey) throw new Error("Gemini API key not found.");
-    return new GoogleGenAI({ apiKey });
-}
-
-async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        try {
-            return await apiCall();
-        } catch (error: any) {
-            const msg = error.message?.toLowerCase() || '';
-            if (attempt === MAX_RETRIES || (msg.includes('limit: 0') || msg.includes('quota'))) {
-                // Se o limite for 0, não adianta tentar de novo.
-                if (msg.includes('limit: 0')) throw new Error("Este modelo não está disponível na sua conta (Quota = 0). Troque o modelo nas configurações.");
-                throw error;
-            }
-            // Backoff exponencial
-            await delay(Math.pow(2, attempt) * 1000 + 1000);
-        }
-    }
-    throw new Error("API call failed.");
-}
-
-async function callModel(model: string, sysParam: string, userParam: string, config: any = {}) {
-    const ai = getAiClient();
-    return withRateLimitHandling(() => ai.models.generateContent({
-        model,
-        contents: userParam,
-        config: {
-            systemInstruction: sysParam,
-            ...(config.jsonOutput && { responseMimeType: "application/json" }),
-            ...(config.responseSchema && { responseSchema: config.responseSchema }),
-            ...(config.googleSearch && { tools: [{ googleSearch: {} }] })
-        }
-    }));
-}
-
-export async function generatePaperTitle(topic: string, language: string, model: string) {
-    const sys = "You are an expert mathematician. Generate a single, high-impact, novel research title.";
-    const user = `Topic: ${topic}. Language: ${language}. Return ONLY the title.`;
-    const res = await callModel(model, sys, user);
-    return res.text.trim().replace(/"/g, '');
-}
-
-export async function generateInitialPaper(title: string, language: string, pages: number, model: string) {
-    const sys = "Write a complete LaTeX paper using the provided template.";
-    const user = `Title: ${title}. Pages: ${pages}. Language: ${language}. Use Google Search for references.\n\nTemplate:\n${ARTICLE_TEMPLATE}`;
-    const res = await callModel(model, sys, user, { googleSearch: true });
-    return { paper: res.text, sources: res.groundingMetadata };
-}
-
-export async function analyzePaper(paper: string, pages: number, model: string) {
-    const sys = "Analyze this LaTeX paper. Return JSON.";
-    const prompt = `Criteria: ${ANALYSIS_TOPICS.map(t => t.name)}. Page target: ${pages}.`;
-    const schema = {
-        type: Type.OBJECT,
-        properties: {
-            analysis: {
-                type: Type.ARRAY,
-                items: {
-                    type: Type.OBJECT,
-                    properties: {
-                        topicName: { type: Type.STRING },
-                        score: { type: Type.NUMBER },
-                        improvement: { type: Type.STRING }
-                    },
-                    required: ["topicName", "score", "improvement"]
-                }
-            }
-        }
-    };
-    const res = await callModel(model, sys, [paper, prompt], { jsonOutput: true, responseSchema: schema });
-    return JSON.parse(res.text);
-}
-
-export async function improvePaper(paper: string, analysis: any, language: string, model: string) {
-    const critiques = analysis.analysis.filter((i: any) => i.score < 8.5).map((i: any) => `- ${i.topicName}: ${i.improvement}`).join('\n');
-    const user = `Improve this paper based on:\n${critiques}\n\nPaper:\n${paper}\n\nReturn complete LaTeX.`;
-    const res = await callModel(model, "You are an expert editor.", user);
-    return res.text;
-}
-```
+Como a IA gera LaTeX, erros de sintaxe são comuns. O sistema deve ter uma função `robustCompile(latexCode)` que:
+1. Tenta compilar via API.
+2. Se falhar (catch error), envia o erro e o código para a IA com o prompt: *"Fix the LaTeX syntax errors in this document based on this compilation log: [ERROR LOG]"*.
+3. Tenta compilar novamente o código corrigido.
 
 ---
 
-## 4. Fluxo Principal (`App.tsx`)
+## 5. Prompt de Engenharia (Templates)
 
-Lógica de automação e integração com interface.
+Utilize este template base para garantir a estrutura do documento:
 
-```tsx
-const handleFullAutomation = async () => {
-    // 1. Geração do Título
-    const topic = MATH_TOPICS[Math.floor(Math.random() * MATH_TOPICS.length)];
-    const title = await generatePaperTitle(topic, language, analysisModel);
-    
-    // 2. Escrita Inicial
-    let currentPaper = (await generateInitialPaper(title, language, pageCount, generationModel)).paper;
-    
-    // 3. Loop de Iteração
-    for (let i = 1; i <= 12; i++) {
-        const analysis = await analyzePaper(currentPaper, pageCount, analysisModel);
-        // Salva estado para UI...
-        
-        if (!analysis.analysis.some(a => a.score < 7.0)) break; // Early stop
-        
-        if (i < 12) {
-            currentPaper = await improvePaper(currentPaper, analysis, language, generationModel);
-        }
-    }
-    
-    // 4. Compilação Robusta (Auto-Fix)
-    try {
-        await compile(currentPaper);
-    } catch {
-        const fixed = await fixLatexPaper(currentPaper, FIX_OPTIONS, analysisModel);
-        await compile(fixed);
-    }
-};
+```latex
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath, amssymb, geometry}
+% ... (outros pacotes padrão)
+\begin{document}
+% O conteúdo deve ser injetado aqui pela IA
+\end{document}
 ```
 
-## 5. Compilação (Proxy)
-
-Função serverless para `functions/compile-latex.js` (Cloudflare/Netlify):
-
-```javascript
-export async function onRequestPost({ request }) {
-    const { latex } = await request.json();
-    const formData = new FormData();
-    formData.append('filecontents[]', latex);
-    formData.append('filename[]', 'document.tex');
-    formData.append('engine', 'pdflatex');
-    formData.append('return', 'pdf');
-    
-    const res = await fetch('https://texlive.net/cgi-bin/latexcgi', { method: 'POST', body: formData });
-    if (!res.ok) return new Response(JSON.stringify({ error: "Compile failed" }), { status: 400 });
-    return new Response(await res.arrayBuffer(), { status: 200 });
-}
-```
+**Regra de Ouro para Referências:** A IA deve ser estritamente proibida de usar `\bibitem` ou BibTeX complexo. As referências devem ser geradas como uma lista simples (`\section{Referências} \noindent [Ref 1] \par \noindent [Ref 2] \par`) para evitar erros de compilação cruzada.

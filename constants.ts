@@ -1,4 +1,3 @@
-
 import type { LanguageOption, AnalysisTopic, StyleGuideOption } from './types';
 
 export const TOTAL_ITERATIONS = 12;
@@ -32,14 +31,14 @@ export const ANALYSIS_TOPICS: AnalysisTopic[] = [
     { num: 4, name: 'LITERATURE REVIEW', desc: 'Uso adequado de fontes e contexto.' },
     { num: 5, name: 'METHODOLOGY CLARITY', desc: 'Clareza e reprodutibilidade.' },
     { num: 6, name: 'RESULTS PRESENTATION', desc: 'Organização e objetividade dos resultados.' },
-    { num: 7, name: 'DISCUSSION AND INTERPRETATION', desc: 'Profundidade da discussão e link com teoria.' },
+    { num: 7, name: 'DISCUSSION DEPTH', desc: 'Interpretação e link com teoria.' },
     { num: 8, name: 'ABSTRACT QUALITY', desc: 'Resumo conciso e completo.' },
     { num: 9, name: 'INTRODUCTION QUALITY', desc: 'Contexto e definição do problema.' },
     { num: 10, name: 'CONCLUSION QUALITY', desc: 'Resumo de achados e trabalhos futuros.' },
-    { num: 11, name: 'ARGUMENTATION STRENGTH', desc: 'Força lógica e evidências.' },
+    { num: 11, name: 'ARGUMENTATION STRENGTH', desc: 'Lógica e evidências.' },
     { num: 12, name: 'COHERENCE AND FLOW', desc: 'Transições suaves entre seções.' },
-    { num: 13, name: 'STRUCTURE AND ORGANIZATION', desc: 'Organização geral do LaTeX.' },
-    { num: 14, name: 'REFERENCES AND CITATIONS', desc: 'Formatação correta e relevância das fontes.' },
+    { num: 13, name: 'STRUCTURE', desc: 'Organização geral do LaTeX.' },
+    { num: 14, name: 'REFERENCES', desc: 'Formatação e relevância.' },
     { num: 15, name: 'SCOPE AND BOUNDARIES', desc: 'Definição clara do escopo.' },
     { num: 16, name: 'SCIENTIFIC HONESTY', desc: 'Transparência e evitar plágio.' },
     { num: 17, name: 'TITLE-CONTENT ALIGNMENT', desc: 'Alinhamento entre título e conteúdo.' },
@@ -47,12 +46,12 @@ export const ANALYSIS_TOPICS: AnalysisTopic[] = [
     { num: 20, name: 'PRACTICAL IMPLICATIONS', desc: 'Relevância prática.' },
     { num: 21, name: 'TERMINOLOGY', desc: 'Uso correto de termos técnicos.' },
     { num: 22, name: 'ETHICAL CONSIDERATIONS', desc: 'Considerações éticas.' },
-    { num: 23, name: 'LATEX TECHNICAL ACCURACY', desc: 'Compilabilidade do código LaTeX.' },
+    { num: 23, name: 'LATEX ACCURACY', desc: 'Compilabilidade técnica.' },
     { num: 24, name: 'STRATEGIC REFINEMENT', desc: 'Melhorias cirúrgicas sem quebrar o texto.' },
     { num: 25, name: 'THEORETICAL FOUNDATION', desc: 'Base teórica sólida.' },
     { num: 26, name: 'SCIENTIFIC CONTENT ACCURACY', desc: 'Precisão das informações científicas.' },
     { num: 27, name: 'DEPTH OF CRITICAL ANALYSIS', desc: 'Profundidade da análise crítica.' },
-    { num: 28, name: 'PAGE COUNT COMPLIANCE', desc: 'Adesão ao número de páginas solicitado.' }
+    { num: 28, name: 'PAGE COUNT', desc: 'Adesão ao tamanho solicitado.' }
 ];
 
 export const FIX_OPTIONS: { key: string; label: string; description: string }[] = [

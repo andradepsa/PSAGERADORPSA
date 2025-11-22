@@ -77,16 +77,23 @@ const ZenodoUploader = forwardRef<ZenodoUploaderRef, ZenodoUploaderProps>(({
             }
             const deposition = await dep_res.json();
             const depositionId = deposition.id;
-            const bucketUrl = deposition.links.bucket;
+            const filesUrl = deposition.links.files;
+            if (!filesUrl) {
+                throw new Error('Could not find the file upload URL in the Zenodo API response.');
+            }
             log(`Deposition created successfully. ID: ${depositionId}`);
 
             // Step 2: Upload the file
             log(`Step 2: Uploading file "${compiledPdfFile.name}"...`);
-            const file_res = await fetch(`${bucketUrl}/${compiledPdfFile.name}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/octet-stream', 'Authorization': `Bearer ${zenodoToken}` },
-                body: compiledPdfFile
+            const formData = new FormData();
+            formData.append('file', compiledPdfFile, compiledPdfFile.name);
+
+            const file_res = await fetch(filesUrl, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${zenodoToken}` }, // Content-Type is not needed with FormData
+                body: formData
             });
+
             if (!file_res.ok) {
                 const errorText = await file_res.text();
                 throw new Error(`Failed to upload file: ${file_res.status} - ${errorText}`);
