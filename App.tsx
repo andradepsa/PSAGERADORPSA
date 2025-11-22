@@ -44,7 +44,7 @@ const App: React.FC = () => {
 
     // == STEP 1: GENERATION STATE ==
     const [language, setLanguage] = useState<Language>('en');
-    const [generationModel, setGenerationModel] = useState('gemini-2.5-pro');
+    const [generationModel, setGenerationModel] = useState('gemini-2.5-flash');
     const [analysisModel, setAnalysisModel] = useState('gemini-2.5-flash');
     const [pageCount, setPageCount] = useState(12);
     const [isGenerating, setIsGenerating] = useState(false);
@@ -93,8 +93,8 @@ const App: React.FC = () => {
     const [keywordsInput, setKeywordsInput] = useState('');
     
     // == SCHEDULER STATE ==
-    const [isSchedulerActive, setIsSchedulerActive] = useState(() => {
-        return localStorage.getItem('schedulerActive') === 'true';
+    const [isContinuousMode, setIsContinuousMode] = useState(() => {
+        return localStorage.getItem('isContinuousMode') === 'true';
     });
     // Fix: Declare schedulerTimeoutRef using `const` and `useRef` to properly scope it.
     const schedulerTimeoutRef = useRef<number | null>(null);
@@ -128,53 +128,6 @@ const App: React.FC = () => {
             console.error("Failed to save article entries to localStorage", error);
         }
     }, [articleEntries]);
-
-
-    // Effect for the daily scheduler
-    useEffect(() => {
-        const scheduleNextRun = () => {
-            if (schedulerTimeoutRef.current) {
-                clearTimeout(schedulerTimeoutRef.current);
-            }
-
-            const now = new Date();
-            const nextRun = new Date(now);
-            nextRun.setHours(3, 0, 0, 0); // Set to 3:00:00 AM
-
-            if (now >= nextRun) {
-                // If it's already past 3 AM today, schedule for 3 AM tomorrow
-                nextRun.setDate(nextRun.getDate() + 1);
-            }
-
-            const timeoutMs = nextRun.getTime() - now.getTime();
-            
-            console.log(`Scheduling next automated run for ${nextRun.toLocaleString()}`);
-
-            schedulerTimeoutRef.current = window.setTimeout(() => {
-                console.log(`[${new Date().toLocaleString()}] Triggering scheduled daily run...`);
-                handleFullAutomation(7); // Run with 7 articles
-                // After running, schedule the next one for the following day
-                scheduleNextRun();
-            }, timeoutMs);
-        };
-
-        if (isSchedulerActive) {
-            scheduleNextRun();
-        } else {
-            if (schedulerTimeoutRef.current) {
-                clearTimeout(schedulerTimeoutRef.current);
-                console.log("Daily scheduler deactivated and cleared.");
-            }
-        }
-
-        // Cleanup on component unmount
-        return () => {
-            if (schedulerTimeoutRef.current) {
-                clearTimeout(schedulerTimeoutRef.current);
-            }
-        };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isSchedulerActive]); // This effect depends only on the active status
 
 
     const getScoreClass = (score: number) => {
@@ -300,8 +253,8 @@ const App: React.FC = () => {
         }
     };
 
-    const handleFullAutomation = async (articlesToGenerate?: number) => {
-        const articlesToProcess = articlesToGenerate ?? numberOfArticles;
+    const handleFullAutomation = async (batchSizeOverride?: number) => {
+        const articlesToProcess = batchSizeOverride ?? (isContinuousMode ? 7 : numberOfArticles);
 
         const storedToken = localStorage.getItem('zenodo_api_key');
         if (!storedToken) {
@@ -322,6 +275,7 @@ const App: React.FC = () => {
 
         try {
             for (let i = 1; i <= articlesToProcess; i++) {
+                if (isGenerationCancelled.current) break;
                 currentArticleIndex = i;
                 setIsGenerationComplete(false);
                 setGenerationProgress(0);
@@ -356,10 +310,21 @@ const App: React.FC = () => {
     
                     const analysisResult: AnalysisResult = await analyzePaper(currentPaper, pageCount, analysisModel);
                     
+                    const validAnalysisItems = analysisResult.analysis.filter(res => 
+                        ANALYSIS_TOPICS.some(topic => topic.num === res.topicNum)
+                    );
+
+                    if (validAnalysisItems.length !== analysisResult.analysis.length) {
+                        console.warn("AI returned some invalid topic numbers. Filtering them out.", {
+                            original: analysisResult.analysis,
+                            filtered: validAnalysisItems
+                        });
+                    }
+
                     const iterationData: IterationAnalysis = {
                         iteration: iter,
-                        results: analysisResult.analysis.map(res => ({
-                            topic: ANALYSIS_TOPICS.find(t => t.num === res.topicNum) || { num: -1, name: 'Unknown', desc: '' },
+                        results: validAnalysisItems.map(res => ({
+                            topic: ANALYSIS_TOPICS.find(t => t.num === res.topicNum)!, // Non-null assertion is safe due to filter above
                             score: res.score,
                             scoreClass: getScoreClass(res.score),
                             improvement: res.improvement
@@ -367,7 +332,7 @@ const App: React.FC = () => {
                     };
                     setAnalysisResults(prev => [...prev, iterationData]);
     
-                    const hasLowScores = analysisResult.analysis.some(res => res.score < 7.0);
+                    const hasLowScores = validAnalysisItems.some(res => res.score < 7.0);
                     if (!hasLowScores) {
                         setGenerationStatus(`✅ Análise do Artigo ${i} concluída! Alta qualidade atingida.`);
                         break;
@@ -375,7 +340,8 @@ const App: React.FC = () => {
     
                     if (iter < TOTAL_ITERATIONS) {
                         setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Refinando com base no feedback ${iter}...`);
-                        const improvedPaper = await improvePaper(currentPaper, analysisResult, language, generationModel);
+                        const validAnalysisResult: AnalysisResult = { analysis: validAnalysisItems };
+                        const improvedPaper = await improvePaper(currentPaper, validAnalysisResult, language, generationModel);
                         currentPaper = improvedPaper;
                     }
                 }
@@ -506,11 +472,35 @@ const App: React.FC = () => {
                      throw new Error("Não foi possível publicar no Zenodo após todas as tentativas.");
                 }
             } // end for
+
+            if (isGenerationCancelled.current) {
+                setIsGenerating(false);
+                setGenerationStatus("❌ Automação cancelada pelo usuário.");
+                return;
+            }
+    
+            // If the batch just finished was part of a continuous run, start the next one.
+            if (isContinuousMode && articlesToProcess === 7) {
+                setGenerationStatus(`✅ Lote de ${articlesToProcess} artigos concluído. Iniciando próximo lote...`);
+                // Use setTimeout to avoid deep recursion stack and give a small breather.
+                setTimeout(() => {
+                    // Re-check flags before starting the next run.
+                    if (isContinuousMode && !isGenerationCancelled.current) {
+                        handleFullAutomation(7); // Call with the batch number
+                    } else {
+                        setIsGenerating(false); // Stop if flags have changed.
+                        setGenerationStatus("✅ Automação Contínua Concluída.");
+                    }
+                }, 1000); // 1 second delay between batches
+            } else {
+                // This was a single run (manual or continuous mode was turned off during run)
+                setIsGenerating(false);
+                setGenerationProgress(100);
+                setGenerationStatus(`✅ Processo concluído! ${articlesToProcess} artigos processados.`);
+                setStep(4);
+            }
+
         } catch (error) {
-            // FIX: Ensure the article number is valid for error messages and provide a fallback title.
-            // This makes error logging more robust, addressing the "scope error" hint by ensuring
-            // that a failure is always correctly and meaningfully registered, even if it occurs
-            // before the article title or index is properly set.
             const articleNumberForError = currentArticleIndex > 0 ? currentArticleIndex : 1;
             const fallbackTitle = latestProcessedTitle || `Artigo ${articleNumberForError} (Geração Falhou)`;
 
@@ -534,11 +524,6 @@ const App: React.FC = () => {
             setIsGenerating(false);
             return;
         }
-    
-        setIsGenerating(false);
-        setGenerationProgress(100);
-        setGenerationStatus(`✅ Processo concluído! ${articlesToProcess} artigos processados.`);
-        setStep(4);
     };
 
     const handleRepublishPending = async (articleId: string) => {
@@ -842,14 +827,15 @@ const App: React.FC = () => {
         { id: 4, title: 'Artigos Publicados', status: 'Ver e filtrar' }
     ];
     
-    const handleToggleScheduler = () => {
-        const newStatus = !isSchedulerActive;
-        setIsSchedulerActive(newStatus);
-        localStorage.setItem('schedulerActive', String(newStatus));
+    const handleToggleContinuousMode = () => {
+        const newStatus = !isContinuousMode;
+        setIsContinuousMode(newStatus);
+        localStorage.setItem('isContinuousMode', String(newStatus));
         if (newStatus) {
-            alert('✅ Agendador diário ativado! 7 artigos serão gerados todos os dias às 3:00 da manhã.');
+            alert('✅ Modo Contínuo ativado! Ao iniciar a automação, o sistema irá gerar lotes de 7 artigos continuamente.');
         } else {
-            alert('❌ Agendador diário desativado.');
+            alert('❌ Modo Contínuo desativado.');
+            isGenerationCancelled.current = true;
         }
     };
 
@@ -951,37 +937,49 @@ const App: React.FC = () => {
                                         value={numberOfArticles}
                                         onChange={(e) => setNumberOfArticles(Math.max(1, Number(e.target.value)))}
                                         className="w-full"
+                                        disabled={isContinuousMode}
                                     />
                                 </div>
                             </div>
                             <div className="mt-6 text-center">
                                 <ActionButton
                                     onClick={() => handleFullAutomation()}
-                                    disabled={isGenerating || isCompiling || isUploading}
-                                    isLoading={isGenerating || isCompiling || isUploading}
-                                    text={`Iniciar Automação (${numberOfArticles} Artigo${numberOfArticles > 1 ? 's' : ''})`}
+                                    disabled={isGenerating}
+                                    isLoading={isGenerating}
+                                    text={`Iniciar Automação (${isContinuousMode ? 7 : numberOfArticles} Artigo${(isContinuousMode ? 7 : numberOfArticles) > 1 ? 's' : ''})`}
                                     loadingText="Em Progresso..."
                                     completed={isGenerationComplete}
                                 />
+                                {isGenerating && (
+                                    <button 
+                                        onClick={() => {
+                                            isGenerationCancelled.current = true;
+                                            setGenerationStatus("🔄 Cancelando após o artigo atual...");
+                                        }}
+                                        className="btn bg-red-600 text-white hover:bg-red-700 mt-4"
+                                    >
+                                        Cancelar Automação
+                                    </button>
+                                )}
                             </div>
                             
                             <div className="mt-6 border-t pt-6">
-                                <h4 className="font-semibold text-center mb-3 text-gray-700">Automação Diária</h4>
+                                <h4 className="font-semibold text-center mb-3 text-gray-700">Automação Contínua (Loop)</h4>
                                 <div className="flex items-center justify-center gap-4">
-                                    <span className={`font-semibold transition-colors ${!isSchedulerActive ? 'text-indigo-600' : 'text-gray-500'}`}>Desativado</span>
+                                    <span className={`font-semibold transition-colors ${!isContinuousMode ? 'text-indigo-600' : 'text-gray-500'}`}>Desativado</span>
                                     <label htmlFor="schedulerToggle" className="relative inline-flex items-center cursor-pointer">
                                         <input
                                             type="checkbox"
-                                            checked={isSchedulerActive}
-                                            onChange={handleToggleScheduler}
+                                            checked={isContinuousMode}
+                                            onChange={handleToggleContinuousMode}
                                             id="schedulerToggle"
                                             className="sr-only peer"
                                         />
                                         <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
                                     </label>
-                                    <span className={`font-semibold transition-colors ${isSchedulerActive ? 'text-indigo-600' : 'text-gray-500'}`}>Ativado</span>
+                                    <span className={`font-semibold transition-colors ${isContinuousMode ? 'text-indigo-600' : 'text-gray-500'}`}>Ativado</span>
                                 </div>
-                                <p className="text-center text-xs text-gray-500 mt-2">Generates 7 articles automatically, every day at 3:00 AM.</p>
+                                <p className="text-center text-xs text-gray-500 mt-2">Quando ativado, gera lotes de 7 artigos continuamente.</p>
                             </div>
 
                         </div>
