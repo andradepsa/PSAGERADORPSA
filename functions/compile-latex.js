@@ -45,18 +45,28 @@ export async function onRequestPost(context) {
             const errorLogHtml = await texliveResponse.text();
             console.error(`TeXLive.net compilation failed. Status: ${texliveResponse.status}.`);
 
-            // Try to extract the log from the <pre> tag which latexcgi usually returns
             const logMatch = errorLogHtml.match(/<pre>([\s\S]*?)<\/pre>/);
-            let detailedError = "Compilation failed. The TeXLive.net server did not return a PDF.";
-            
+            let detailedError;
+
             if (logMatch && logMatch[1]) {
-                // Return a generous chunk of the log so the AI can analyze it. 
-                // Increased from 3000 to 15000 to ensure we catch errors buried deep in verbose logs.
-                detailedError = `TeX Live Error Log:\n${logMatch[1].substring(0, 15000)}`; 
+                const logText = logMatch[1];
+                const errorMarker = '! ';
+                const errorIndex = logText.indexOf(errorMarker);
+
+                if (errorIndex !== -1) {
+                    // Extract a large chunk of context around the error for the AI
+                    const contextBefore = 500;
+                    const contextAfter = 10000;
+                    const startIndex = Math.max(0, errorIndex - contextBefore);
+                    const relevantLog = logText.substring(startIndex, errorIndex + contextAfter);
+                    detailedError = `TeX Live Error Log:\n... (log truncated) ...\n${relevantLog}`;
+                } else {
+                    // If no '!' is found, send the end of the log, as errors are often at the end.
+                    detailedError = `TeX Live Error Log (Warning or unusual error):\n... (log truncated) ...\n${logText.substring(Math.max(0, logText.length - 15000))}`;
+                }
             } else {
-                // Fallback: return the raw HTML (truncated less aggressively)
-                // Increased from 1000 to 5000.
-                detailedError = `Compilation failed. Upstream response:\n${errorLogHtml.substring(0, 5000)}`;
+                // Fallback if the <pre> tag is missing
+                detailedError = `Compilation failed. Upstream response (could not find <pre> tag):\n${errorLogHtml.substring(0, 5000)}`;
             }
             
             return new Response(JSON.stringify({ error: detailedError }), {

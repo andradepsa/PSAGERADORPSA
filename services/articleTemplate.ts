@@ -2,6 +2,7 @@
 // services/articleTemplate.ts
 
 export const ARTICLE_TEMPLATE = `\\documentclass[12pt,a4paper]{article}
+\\usepackage[utf8]{inputenc}
 \\usepackage[T1]{fontenc}
 \\usepackage{amsmath, amssymb, geometry, setspace, url, verbatim}
 % Babel package will be added dynamically based on language
