@@ -1,6 +1,7 @@
 
 
 
+
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Language, AnalysisResult, PaperSource, StyleGuide } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES } from '../constants';
@@ -169,6 +170,15 @@ export async function generatePaperTitle(topic: string, language: Language, mode
 }
 
 
+// Programmatic post-processing to fix common LaTeX issues
+function postProcessLatex(latexCode: string): string {
+    // Robustly replace ampersands used for authors in bibliographies
+    // This looks for "Name, A. & Name, B." and similar patterns.
+    // It's safer than a global replace to avoid affecting tables or math environments.
+    return latexCode.replace(/,?\s+&\s+/g, ' and ');
+}
+
+
 export async function generateInitialPaper(title: string, language: Language, pageCount: number, model: string): Promise<{ paper: string, sources: PaperSource[] }> {
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
     const babelLanguage = BABEL_LANG_MAP[language];
@@ -241,7 +251,7 @@ ${templateWithBabel}
             title: chunk.web.title,
         })) || [];
 
-    return { paper, sources };
+    return { paper: postProcessLatex(paper), sources };
 }
 
 export async function analyzePaper(paperContent: string, pageCount: number, model: string): Promise<AnalysisResult> {
@@ -361,7 +371,7 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
         paper += '\n\\end{document}';
     }
 
-    return paper;
+    return postProcessLatex(paper);
 }
 
 export async function fixLatexPaper(paperContent: string, compilationError: string, model: string): Promise<string> {
@@ -402,7 +412,7 @@ ${paperContent}
         paper += '\n\\end{document}';
     }
 
-    return paper;
+    return postProcessLatex(paper);
 }
 
 export async function reformatPaperWithStyleGuide(paperContent: string, styleGuide: StyleGuide, model: string): Promise<string> {
@@ -440,5 +450,5 @@ export async function reformatPaperWithStyleGuide(paperContent: string, styleGui
         paper += '\n\\end{document}';
     }
 
-    return paper;
+    return postProcessLatex(paper);
 }

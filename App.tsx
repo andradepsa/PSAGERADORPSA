@@ -145,19 +145,24 @@ const App: React.FC = () => {
             if (schedulerTimeoutRef.current) clearTimeout(schedulerTimeoutRef.current);
 
             const now = new Date();
+            
+            const fiveAM = new Date(now);
+            fiveAM.setHours(5, 0, 0, 0);
+            
             const noon = new Date(now);
             noon.setHours(12, 0, 0, 0);
-            const midnight = new Date(now);
-            midnight.setHours(24, 0, 0, 0);
+
+            const nextDayFiveAM = new Date(now);
+            nextDayFiveAM.setDate(now.getDate() + 1);
+            nextDayFiveAM.setHours(5, 0, 0, 0);
 
             let nextRunTime;
-            if (now < noon) nextRunTime = noon;
-            else if (now < midnight) nextRunTime = midnight;
-            else {
-                const nextDayNoon = new Date(now);
-                nextDayNoon.setDate(now.getDate() + 1);
-                nextDayNoon.setHours(12, 0, 0, 0);
-                nextRunTime = nextDayNoon;
+            if (now < fiveAM) {
+                nextRunTime = fiveAM;
+            } else if (now < noon) {
+                nextRunTime = noon;
+            } else {
+                nextRunTime = nextDayFiveAM;
             }
             
             const delay = nextRunTime.getTime() - now.getTime();
@@ -826,7 +831,7 @@ const App: React.FC = () => {
                                  <div>
                                     <h4 className="font-semibold text-center mb-2 text-gray-700">Agendamento Automático</h4>
                                     <div className="flex items-center justify-center gap-2"><span className={`font-semibold transition-colors ${!isSchedulerEnabled ? 'text-indigo-600' : 'text-gray-500'}`}>Off</span><label htmlFor="schedulerToggle" className="relative inline-flex items-center cursor-pointer"><input type="checkbox" checked={isSchedulerEnabled} onChange={handleToggleScheduler} id="schedulerToggle" className="sr-only peer" /><div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div></label><span className={`font-semibold transition-colors ${isSchedulerEnabled ? 'text-indigo-600' : 'text-gray-500'}`}>On</span></div>
-                                    <p className="text-center text-xs text-gray-500 mt-1">Inicia lotes às 12h e 24h.</p>
+                                    <p className="text-center text-xs text-gray-500 mt-1">Inicia lotes às 05h e 12h.</p>
                                 </div>
                             </div>
 
