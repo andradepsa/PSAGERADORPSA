@@ -92,11 +92,13 @@ const App: React.FC = () => {
     const [uploadStatus, setUploadStatus] = useState<React.ReactNode>(null);
     const [keywordsInput, setKeywordsInput] = useState('');
     
-    // == SCHEDULER STATE ==
+    // == AUTOMATION & SCHEDULER STATE ==
     const [isContinuousMode, setIsContinuousMode] = useState(() => {
         return localStorage.getItem('isContinuousMode') === 'true';
     });
-    // Fix: Declare schedulerTimeoutRef using `const` and `useRef` to properly scope it.
+    const [isSchedulerEnabled, setIsSchedulerEnabled] = useState(() => {
+        return localStorage.getItem('isSchedulerEnabled') === 'true';
+    });
     const schedulerTimeoutRef = useRef<number | null>(null);
     const uploaderRef = useRef<ZenodoUploaderRef>(null);
 
@@ -129,6 +131,55 @@ const App: React.FC = () => {
         }
     }, [articleEntries]);
 
+    // Effect for the automatic scheduler
+    useEffect(() => {
+        if (!isSchedulerEnabled || isGenerating) {
+            if (schedulerTimeoutRef.current) {
+                clearTimeout(schedulerTimeoutRef.current);
+                schedulerTimeoutRef.current = null;
+            }
+            return;
+        }
+
+        const scheduleNextRun = () => {
+            if (schedulerTimeoutRef.current) clearTimeout(schedulerTimeoutRef.current);
+
+            const now = new Date();
+            const noon = new Date(now);
+            noon.setHours(12, 0, 0, 0);
+            const midnight = new Date(now);
+            midnight.setHours(24, 0, 0, 0);
+
+            let nextRunTime;
+            if (now < noon) nextRunTime = noon;
+            else if (now < midnight) nextRunTime = midnight;
+            else {
+                const nextDayNoon = new Date(now);
+                nextDayNoon.setDate(now.getDate() + 1);
+                nextDayNoon.setHours(12, 0, 0, 0);
+                nextRunTime = nextDayNoon;
+            }
+            
+            const delay = nextRunTime.getTime() - now.getTime();
+            console.log(`Scheduling next automatic run at ${nextRunTime.toLocaleString()} (in ${Math.round(delay/1000/60)} minutes)`);
+
+            schedulerTimeoutRef.current = window.setTimeout(() => {
+                console.log("Scheduler triggered! Starting automatic run...");
+                if (!isGenerating) handleFullAutomation(7);
+                scheduleNextRun();
+            }, delay);
+        };
+
+        scheduleNextRun();
+
+        return () => {
+            if (schedulerTimeoutRef.current) {
+                clearTimeout(schedulerTimeoutRef.current);
+                schedulerTimeoutRef.current = null;
+            }
+        };
+    }, [isSchedulerEnabled, isGenerating]);
+
 
     const getScoreClass = (score: number) => {
         if (score >= 8.5) return 'bg-green-500';
@@ -136,129 +187,104 @@ const App: React.FC = () => {
         return 'bg-red-500';
     };
 
-    // New function for robust compilation with retries and auto-fixing
     const robustCompile = async (
         codeToCompile: string,
         onStatusUpdate: (message: string) => void
     ): Promise<{ pdfFile: File; pdfUrl: string; finalCode: string; }> => {
-        try {
-            console.group("🔍 DEBUG: Starting Robust Compile");
-            console.log("Original Code Length:", codeToCompile.length);
-            
-            // --- EXPLICIT LOGGING FOR USER DEBUG ---
-            console.log("👇👇👇 FULL LATEX CODE BELOW 👇👇👇");
-            console.log(codeToCompile);
-            console.log("👆👆👆 FULL LATEX CODE ABOVE 👆👆👆");
-            
-            const MAX_COMPILE_ATTEMPTS = 3;
-            let lastError: Error | null = null;
+        console.group("🔍 DEBUG: Starting Robust Compile");
+        console.log("Original Code Length:", codeToCompile.length);
+        console.log("👇👇👇 FULL LATEX CODE BELOW 👇👇👇");
+        console.log(codeToCompile);
+        console.log("👆👆👆 FULL LATEX CODE ABOVE 👆👆👆");
+        
+        const MAX_COMPILE_ATTEMPTS = 3;
+        let lastError: Error | null = null;
 
-            // --- Part 1: Initial Compilation Attempts ---
-            for (let attempt = 1; attempt <= MAX_COMPILE_ATTEMPTS; attempt++) {
-                try {
-                    onStatusUpdate(`⏳ Compilando (Tentativa ${attempt}/${MAX_COMPILE_ATTEMPTS})...`);
-                    console.log(`Attempt ${attempt}: Sending request to /compile-latex`);
-                    
-                    const response = await fetch('/compile-latex', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ latex: codeToCompile }),
-                    });
-
-                    if (!response.ok) {
-                        const errorData = await response.json();
-                        console.error(`Attempt ${attempt} FAILED. Server error:`, errorData);
-                        // The errorData.error now contains the full log from the server function
-                        throw new Error(errorData.error || `Falha na compilação (tentativa ${attempt}).`);
-                    }
-                    
-                    const base64Pdf = await response.text();
-                    console.log(`Attempt ${attempt} SUCCESS. PDF received.`);
-                    const pdfUrl = `data:application/pdf;base64,${base64Pdf}`;
-                    const blob = await (await fetch(pdfUrl)).blob();
-                    const file = new File([blob], "paper.pdf", { type: "application/pdf" });
-                    
-                    console.groupEnd();
-                    return { pdfFile: file, pdfUrl, finalCode: codeToCompile };
-
-                } catch (error) {
-                    lastError = error instanceof Error ? error : new Error(String(error));
-                    console.warn(`Compilation attempt ${attempt} failed:`, lastError.message);
-                    if (attempt < MAX_COMPILE_ATTEMPTS) {
-                        await new Promise(resolve => setTimeout(resolve, 1500));
-                    }
-                }
-            }
-            
-            // --- Part 2: Automatic Fix and Final Attempt ---
-            if (lastError) {
-                onStatusUpdate(`⚠️ Compilação falhou. Tentando corrigir o código com IA...`);
-                console.log("Initiating AI Fix...");
-                console.log("Error Reason (Full Log sent to AI):", lastError.message);
+        for (let attempt = 1; attempt <= MAX_COMPILE_ATTEMPTS; attempt++) {
+            try {
+                onStatusUpdate(`⏳ Compilando (Tentativa ${attempt}/${MAX_COMPILE_ATTEMPTS})...`);
+                console.log(`Attempt ${attempt}: Sending request to /compile-latex`);
                 
-                let fixedCode = '';
-                try {
-                    fixedCode = await fixLatexPaper(
-                        codeToCompile, 
-                        lastError.message, // Passing the full log to the AI
-                        analysisModel // Use the faster model for fixing
-                    );
-                    console.log("AI Fix Generated. New Code Length:", fixedCode.length);
-                    
-                    // Debug the fixed code too
-                    console.log("👇👇👇 FIXED LATEX CODE BELOW 👇👇👇");
-                    console.log(fixedCode);
-                    console.log("👆👆👆 FIXED LATEX CODE ABOVE 👆👆👆");
+                const response = await fetch('/compile-latex', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ latex: codeToCompile }),
+                });
 
-                } catch (fixError) {
-                    const fixErrorMessage = fixError instanceof Error ? fixError.message : String(fixError);
-                    console.error("AI Fix Failed:", fixErrorMessage);
-                    throw new Error(`A compilação falhou e a tentativa de correção automática também falhou. Erro original: ${lastError.message}. Erro da correção: ${fixErrorMessage}`);
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    console.error(`Attempt ${attempt} FAILED. Server error:`, errorData);
+                    throw new Error(errorData.error || `Falha na compilação (tentativa ${attempt}).`);
                 }
+                
+                const base64Pdf = await response.text();
+                console.log(`Attempt ${attempt} SUCCESS. PDF received.`);
+                const pdfUrl = `data:application/pdf;base64,${base64Pdf}`;
+                const blob = await (await fetch(pdfUrl)).blob();
+                const file = new File([blob], "paper.pdf", { type: "application/pdf" });
+                
+                console.groupEnd();
+                return { pdfFile: file, pdfUrl, finalCode: codeToCompile };
 
-                onStatusUpdate(`✅ Código corrigido. Tentando compilação final...`);
-                try {
-                    const response = await fetch('/compile-latex', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ latex: fixedCode }),
-                    });
-
-                    if (!response.ok) {
-                        const errorData = await response.json();
-                        console.error("Final Compilation Failed:", errorData);
-                        throw new Error(errorData.error || 'A compilação final falhou mesmo após a correção automática.');
-                    }
-
-                    const base64Pdf = await response.text();
-                    const pdfUrl = `data:application/pdf;base64,${base64Pdf}`;
-                    const blob = await (await fetch(pdfUrl)).blob();
-                    const file = new File([blob], "paper.pdf", { type: "application/pdf" });
-
-                    console.groupEnd();
-                    return { pdfFile: file, pdfUrl, finalCode: fixedCode };
-                    
-                } catch (finalCompileError) {
-                    const finalErrorMessage = finalCompileError instanceof Error ? finalCompileError.message : String(finalCompileError);
-                    console.error("Final Error:", finalErrorMessage);
-                    console.groupEnd();
-                    throw new Error(`A compilação falhou após a correção automática. Erro final: ${finalErrorMessage}`);
-                }
+            } catch (error) {
+                lastError = error instanceof Error ? error : new Error(String(error));
+                console.warn(`Compilation attempt ${attempt} failed:`, lastError.message);
+                if (attempt < MAX_COMPILE_ATTEMPTS) await new Promise(resolve => setTimeout(resolve, 1500));
             }
-            console.groupEnd();
-            throw new Error("Falha na compilação após todas as tentativas.");
-        } catch(error) {
-            console.groupEnd();
-            throw error; // Re-throw the error to be handled by the calling function
         }
+        
+        if (lastError) {
+            onStatusUpdate(`⚠️ Compilação falhou. Tentando corrigir o código com IA...`);
+            console.log("Initiating AI Fix...");
+            console.log("Error Reason (Full Log sent to AI):", lastError.message);
+            
+            let fixedCode = '';
+            try {
+                fixedCode = await fixLatexPaper(codeToCompile, lastError.message, analysisModel);
+                console.log("AI Fix Generated. New Code Length:", fixedCode.length);
+                console.log("👇👇👇 FIXED LATEX CODE BELOW 👇👇👇");
+                console.log(fixedCode);
+                console.log("👆👆👆 FIXED LATEX CODE ABOVE 👆👆👆");
+            } catch (fixError) {
+                const fixErrorMessage = fixError instanceof Error ? fixError.message : String(fixError);
+                console.error("AI Fix Failed:", fixErrorMessage);
+                throw new Error(`A compilação falhou e a tentativa de correção automática também falhou. Erro original: ${lastError.message}. Erro da correção: ${fixErrorMessage}`);
+            }
+
+            onStatusUpdate(`✅ Código corrigido. Tentando compilação final...`);
+            try {
+                const response = await fetch('/compile-latex', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ latex: fixedCode }),
+                });
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    console.error("Final Compilation Failed:", errorData);
+                    throw new Error(errorData.error || 'A compilação final falhou mesmo após a correção automática.');
+                }
+                const base64Pdf = await response.text();
+                const pdfUrl = `data:application/pdf;base64,${base64Pdf}`;
+                const blob = await (await fetch(pdfUrl)).blob();
+                const file = new File([blob], "paper.pdf", { type: "application/pdf" });
+                console.groupEnd();
+                return { pdfFile: file, pdfUrl, finalCode: fixedCode };
+            } catch (finalCompileError) {
+                const finalErrorMessage = finalCompileError instanceof Error ? finalCompileError.message : String(finalCompileError);
+                console.error("Final Error:", finalErrorMessage);
+                console.groupEnd();
+                throw new Error(`A compilação falhou após a correção automática. Erro final: ${finalErrorMessage}`);
+            }
+        }
+        console.groupEnd();
+        throw new Error("Falha na compilação após todas as tentativas.");
     };
 
     const handleFullAutomation = async (batchSizeOverride?: number) => {
         const articlesToProcess = batchSizeOverride ?? (isContinuousMode ? 7 : numberOfArticles);
-
         const storedToken = localStorage.getItem('zenodo_api_key');
         if (!storedToken) {
-            alert('❌ Token Zenodo não encontrado! Por favor, configure-o nas definições (ícone de engrenagem) antes de iniciar o processo automático.');
+            alert('❌ Token Zenodo não encontrado! Por favor, configure-o nas definições (ícone de engrenagem) antes de iniciar.');
             return;
         }
         setZenodoToken(storedToken);
@@ -268,263 +294,142 @@ const App: React.FC = () => {
         setUploadStatus(null);
         setStep(1);
         
-        let latestProcessedTitle: string = '';
-        let latestProcessedLatexCode: string = '';
-        let currentArticleEntryId: string = '';
-        let currentArticleIndex: number = 0;
+        for (let i = 1; i <= articlesToProcess; i++) {
+            if (isGenerationCancelled.current) break;
+            
+            const articleEntryId = crypto.randomUUID();
+            let temporaryTitle = `Artigo ${i} (Geração do Título Falhou)`;
+            let currentPaper = '';
 
-        try {
-            for (let i = 1; i <= articlesToProcess; i++) {
-                if (isGenerationCancelled.current) break;
-                currentArticleIndex = i;
+            try {
                 setIsGenerationComplete(false);
                 setGenerationProgress(0);
                 setAnalysisResults([]);
                 setPaperSources([]);
                 setGeneratedTitle('');
                 setFinalLatexCode('');
-    
-                const articleEntryId = crypto.randomUUID();
-                currentArticleEntryId = articleEntryId;
-                
-                let currentPaper = '';
-    
+
                 setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando um título inovador...`);
                 setGenerationProgress(5);
                 const randomTopic = MATH_TOPICS[Math.floor(Math.random() * MATH_TOPICS.length)];
-                const temporaryTitle = await generatePaperTitle(randomTopic, language, analysisModel);
+                temporaryTitle = await generatePaperTitle(randomTopic, language, analysisModel);
                 setGeneratedTitle(temporaryTitle);
-                latestProcessedTitle = temporaryTitle;
-    
+
                 setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando a primeira versão...`);
                 setGenerationProgress(15);
                 const { paper: initialPaper, sources } = await generateInitialPaper(temporaryTitle, language, pageCount, generationModel);
                 currentPaper = initialPaper;
                 setPaperSources(sources);
-    
+
                 for (let iter = 1; iter <= TOTAL_ITERATIONS; iter++) {
-                    if (isGenerationCancelled.current) break;
-                    const progress = 15 + (iter / TOTAL_ITERATIONS) * 75;
-                    setGenerationProgress(progress);
-                    setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Iniciando iteração de análise ${iter}/${TOTAL_ITERATIONS}...`);
-    
-                    const analysisResult: AnalysisResult = await analyzePaper(currentPaper, pageCount, analysisModel);
-                    
-                    const validAnalysisItems = analysisResult.analysis.filter(res => 
-                        ANALYSIS_TOPICS.some(topic => topic.num === res.topicNum)
-                    );
-
-                    if (validAnalysisItems.length !== analysisResult.analysis.length) {
-                        console.warn("AI returned some invalid topic numbers. Filtering them out.", {
-                            original: analysisResult.analysis,
-                            filtered: validAnalysisItems
-                        });
-                    }
-
-                    const iterationData: IterationAnalysis = {
-                        iteration: iter,
-                        results: validAnalysisItems.map(res => ({
-                            topic: ANALYSIS_TOPICS.find(t => t.num === res.topicNum)!, // Non-null assertion is safe due to filter above
-                            score: res.score,
-                            scoreClass: getScoreClass(res.score),
-                            improvement: res.improvement
-                        }))
-                    };
-                    setAnalysisResults(prev => [...prev, iterationData]);
-    
-                    const hasLowScores = validAnalysisItems.some(res => res.score < 7.0);
-                    if (!hasLowScores) {
-                        setGenerationStatus(`✅ Análise do Artigo ${i} concluída! Alta qualidade atingida.`);
-                        break;
-                    }
-    
+                    if (isGenerationCancelled.current) throw new Error("Operação cancelada pelo usuário.");
+                    setGenerationProgress(15 + (iter / TOTAL_ITERATIONS) * 75);
+                    setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Analisando (iteração ${iter}/${TOTAL_ITERATIONS})...`);
+                    const analysisResult = await analyzePaper(currentPaper, pageCount, analysisModel);
+                    const validAnalysisItems = analysisResult.analysis.filter(res => ANALYSIS_TOPICS.some(topic => topic.num === res.topicNum));
+                    setAnalysisResults(prev => [...prev, { iteration: iter, results: validAnalysisItems.map(res => ({ topic: ANALYSIS_TOPICS.find(t => t.num === res.topicNum)!, score: res.score, scoreClass: getScoreClass(res.score), improvement: res.improvement })) }]);
+                    if (!validAnalysisItems.some(res => res.score < 7.0)) break;
                     if (iter < TOTAL_ITERATIONS) {
                         setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Refinando com base no feedback ${iter}...`);
-                        const validAnalysisResult: AnalysisResult = { analysis: validAnalysisItems };
-                        const improvedPaper = await improvePaper(currentPaper, validAnalysisResult, language, generationModel);
-                        currentPaper = improvedPaper;
+                        currentPaper = await improvePaper(currentPaper, { analysis: validAnalysisItems }, language, generationModel);
                     }
                 }
-    
+
                 if (isGenerationCancelled.current) continue;
 
-                latestProcessedLatexCode = currentPaper;
                 setFinalLatexCode(currentPaper);
-                
                 setGenerationProgress(95);
                 let compiledFile: File | null = null;
+                const compilationUpdater = (message: string) => setGenerationStatus(`Artigo ${i}/${articlesToProcess}: ${message}`);
+                const { pdfFile, finalCode } = await robustCompile(currentPaper, compilationUpdater);
+                compiledFile = pdfFile;
+                currentPaper = finalCode;
 
-                try {
-                    const compilationUpdater = (message: string) => {
-                        setGenerationStatus(`Artigo ${i}/${articlesToProcess}: ${message}`);
-                    };
-                    
-                    const { pdfFile, finalCode } = await robustCompile(currentPaper, compilationUpdater);
-                    compiledFile = pdfFile;
-                    latestProcessedLatexCode = finalCode;
-
-                } catch (error) {
-                    const errorMessage = error instanceof Error ? error.message : 'Falha na compilação por motivo desconhecido.';
-                    setGenerationStatus(`❌ Falha na compilação do Artigo ${i}. Pulando para o próximo...`);
-                    console.error(`Compilation failed for paper ${i}:`, error);
-                    
-                    setArticleEntries(prev => [...prev, {
-                        id: articleEntryId,
-                        title: latestProcessedTitle,
-                        date: new Date().toISOString(),
-                        status: 'compilation_failed',
-                        latexCode: currentPaper,
-                        errorMessage: errorMessage,
-                    }]);
-                    await new Promise(resolve => setTimeout(resolve, 4000)); 
-                    continue;
-                }
-                
                 if (isGenerationCancelled.current) continue;
 
                 setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Publicando no Zenodo...`);
                 setGenerationProgress(98);
-                const metadataForUpload = extractMetadata(latestProcessedLatexCode, true);
-                const keywordsForUpload = latestProcessedLatexCode.match(/\\keywords\{([^}]+)\}/)?.[1] || '';
-    
-                const MAX_UPLOAD_RETRIES = 10;
+                const metadataForUpload = extractMetadata(currentPaper, true);
+                const keywordsForUpload = currentPaper.match(/\\keywords\{([^}]+)\}/)?.[1] || '';
                 let publishedResult: PublishedArticle | null = null;
-                for (let attempt = 1; attempt <= MAX_UPLOAD_RETRIES; attempt++) {
+
+                for (let attempt = 1; attempt <= 10; attempt++) {
                     if (isGenerationCancelled.current) break;
                     try {
                         const baseUrl = useSandbox ? 'https://sandbox.zenodo.org/api' : 'https://zenodo.org/api';
-                        
-                        const createResponse = await fetch(`${baseUrl}/deposit/depositions`, {
-                            method: 'POST',
-                            headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' },
-                            body: JSON.stringify({})
-                        });
-                        if (!createResponse.ok) throw new Error(`Erro ${createResponse.status}: Falha ao criar depósito.`);
+                        const createResponse = await fetch(`${baseUrl}/deposit/depositions`, { method: 'POST', headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+                        if (!createResponse.ok) throw new Error(`Erro ${createResponse.status} ao criar depósito.`);
                         const deposit = await createResponse.json();
-    
                         const formData = new FormData();
                         formData.append('file', compiledFile, 'paper.pdf');
-                        const uploadResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}/files`, {
-                            method: 'POST',
-                            headers: { 'Authorization': `Bearer ${storedToken}` },
-                            body: formData
-                        });
+                        const uploadResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}/files`, { method: 'POST', headers: { 'Authorization': `Bearer ${storedToken}` }, body: formData });
                         if (!uploadResponse.ok) throw new Error('Falha no upload do PDF');
-    
-                        const keywordsArray = keywordsForUpload.split(',').map(k => k.trim()).filter(k => k);
-                        const metadataPayload = {
-                            metadata: {
-                                title: metadataForUpload.title,
-                                upload_type: 'publication',
-                                publication_type: 'article',
-                                description: metadataForUpload.abstract,
-                                creators: metadataForUpload.authors.filter(a => a.name).map(a => ({
-                                    name: a.name,
-                                    orcid: a.orcid || undefined
-                                })),
-                                keywords: keywordsArray.length > 0 ? keywordsArray : undefined
-                            }
-                        };
-                        const metadataResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}`, {
-                            method: 'PUT',
-                            headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' },
-                            body: JSON.stringify(metadataPayload)
-                        });
+                        const metadataPayload = { metadata: { title: metadataForUpload.title, upload_type: 'publication', publication_type: 'article', description: metadataForUpload.abstract, creators: metadataForUpload.authors.filter(a => a.name).map(a => ({ name: a.name, orcid: a.orcid || undefined })), keywords: keywordsForUpload.split(',').map(k => k.trim()).filter(k => k) } };
+                        const metadataResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}`, { method: 'PUT', headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(metadataPayload) });
                         if (!metadataResponse.ok) throw new Error('Falha ao atualizar metadados');
-    
-                        const publishResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}/actions/publish`, {
-                            method: 'POST',
-                            headers: { 'Authorization': `Bearer ${storedToken}` }
-                        });
+                        const publishResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}/actions/publish`, { method: 'POST', headers: { 'Authorization': `Bearer ${storedToken}` } });
                         if (!publishResponse.ok) throw new Error('Falha ao publicar');
                         const published = await publishResponse.json();
-    
-                        const zenodoLink = useSandbox ? `https://sandbox.zenodo.org/records/${deposit.id}` : `https://zenodo.org/records/${deposit.id}`;
-                        publishedResult = { 
-                            doi: published.doi, 
-                            link: zenodoLink, 
-                            title: metadataForUpload.title,
-                            date: new Date().toISOString()
-                        };
+                        publishedResult = { doi: published.doi, link: useSandbox ? `https://sandbox.zenodo.org/records/${deposit.id}` : `https://zenodo.org/records/${deposit.id}`, title: metadataForUpload.title, date: new Date().toISOString() };
                         break;
-    
                     } catch (error) {
                         const errorMessage = error instanceof Error ? error.message : `Tentativa ${attempt} falhou.`;
-                        if (attempt === MAX_UPLOAD_RETRIES) {
-                            throw new Error(`Falha ao enviar para o Zenodo após ${MAX_UPLOAD_RETRIES} tentativas. Erro final: ${errorMessage}`);
-                        }
+                        if (attempt === 10) throw new Error(`Falha ao enviar para o Zenodo após 10 tentativas. Erro final: ${errorMessage}`);
                         const delayTime = 15000 + (5000 * (attempt - 1));
-                        setGenerationStatus(`Artigo ${i}/${articlesToProcess}: ❌ ${errorMessage} Aguardando ${delayTime / 1000}s para tentar novamente...`);
+                        setGenerationStatus(`Artigo ${i}/${articlesToProcess}: ❌ ${errorMessage} Aguardando ${delayTime / 1000}s...`);
                         await new Promise(resolve => setTimeout(resolve, delayTime));
                     }
                 }
                 
                 if (publishedResult) {
-                    setArticleEntries(prev => [...prev, {
-                        id: articleEntryId,
-                        title: metadataForUpload.title,
-                        date: publishedResult.date,
-                        status: 'published',
-                        doi: publishedResult.doi,
-                        link: publishedResult.link,
-                    }]);
+                    setArticleEntries(prev => [...prev, { id: articleEntryId, title: metadataForUpload.title, date: publishedResult.date, status: 'published', doi: publishedResult.doi, link: publishedResult.link }]);
                 } else if (!isGenerationCancelled.current) {
                      throw new Error("Não foi possível publicar no Zenodo após todas as tentativas.");
                 }
-            } // end for
 
-            if (isGenerationCancelled.current) {
-                setIsGenerating(false);
-                setGenerationStatus("❌ Automação cancelada pelo usuário.");
-                return;
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : `Ocorreu um erro desconhecido no artigo ${i}.`;
+                console.error(`Error processing article ${i}:`, error);
+                
+                const status = errorMessage.includes('compilação') ? 'compilation_failed' : 'upload_failed';
+                setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: status, latexCode: currentPaper, errorMessage: errorMessage }]);
+                
+                let pauseDuration = 3000;
+                if (errorMessage.toLowerCase().includes('quota')) {
+                    setGenerationStatus(`⚠️ Limite de cota da API atingido. Pausando por 5 minutos...`);
+                    pauseDuration = 300000;
+                } else if (errorMessage.toLowerCase().includes('network') || errorMessage.toLowerCase().includes('fetch')) {
+                    setGenerationStatus(`🔌 Problema de rede detectado. Pausando por 1 minuto...`);
+                    pauseDuration = 60000;
+                } else {
+                     setGenerationStatus(`❌ Erro no artigo ${i}: ${errorMessage}. Continuando para o próximo em 3s...`);
+                }
+                await new Promise(resolve => setTimeout(resolve, pauseDuration));
+                continue;
             }
-    
-            // If the batch just finished was part of a continuous run, start the next one.
-            if (isContinuousMode && articlesToProcess === 7) {
-                setGenerationStatus(`✅ Lote de ${articlesToProcess} artigos concluído. Iniciando próximo lote...`);
-                // Use setTimeout to avoid deep recursion stack and give a small breather.
-                setTimeout(() => {
-                    // Re-check flags before starting the next run.
-                    if (isContinuousMode && !isGenerationCancelled.current) {
-                        handleFullAutomation(7); // Call with the batch number
-                    } else {
-                        setIsGenerating(false); // Stop if flags have changed.
-                        setGenerationStatus("✅ Automação Contínua Concluída.");
-                    }
-                }, 1000); // 1 second delay between batches
-            } else {
-                // This was a single run (manual or continuous mode was turned off during run)
-                setIsGenerating(false);
-                setGenerationProgress(100);
-                setGenerationStatus(`✅ Processo concluído! ${articlesToProcess} artigos processados.`);
-                setStep(4);
-            }
+        } // end for loop
 
-        } catch (error) {
-            const articleNumberForError = currentArticleIndex > 0 ? currentArticleIndex : 1;
-            const fallbackTitle = latestProcessedTitle || `Artigo ${articleNumberForError} (Geração Falhou)`;
-
-            const errorMessage = error instanceof Error ? error.message : `Ocorreu um erro desconhecido no artigo ${articleNumberForError}.`;
-            
-            if (errorMessage.toLowerCase().includes('quota')) {
-                setGenerationStatus(`⚠️ Limite de cota da API atingido. A automação foi pausada. O processo será retomado no próximo dia agendado.`);
-            } else {
-                setGenerationStatus(`❌ Erro no artigo ${articleNumberForError}: ${errorMessage}. Parando automação.`);
-            }
-
-            setArticleEntries(prev => [...prev, {
-                id: currentArticleEntryId || crypto.randomUUID(), // Ensure an ID exists
-                title: fallbackTitle,
-                date: new Date().toISOString(),
-                status: 'upload_failed',
-                latexCode: latestProcessedLatexCode,
-                errorMessage: errorMessage,
-            }]);
-
+        if (isGenerationCancelled.current) {
             setIsGenerating(false);
-            return;
+            setGenerationStatus("❌ Automação cancelada pelo usuário.");
+        } else if (isContinuousMode) {
+            setGenerationStatus(`✅ Lote de ${articlesToProcess} artigos concluído. Iniciando próximo lote...`);
+            setTimeout(() => {
+                if (isContinuousMode && !isGenerationCancelled.current) {
+                    handleFullAutomation(7);
+                } else {
+                    setIsGenerating(false);
+                    setGenerationStatus("✅ Automação Contínua Concluída.");
+                }
+            }, 5000);
+        } else {
+            setIsGenerating(false);
+            setGenerationProgress(100);
+            setGenerationStatus(`✅ Processo concluído! ${articlesToProcess} artigos processados.`);
+            setStep(4);
         }
     };
+
 
     const handleRepublishPending = async (articleId: string) => {
         setIsRepublishingId(articleId);
@@ -831,12 +736,13 @@ const App: React.FC = () => {
         const newStatus = !isContinuousMode;
         setIsContinuousMode(newStatus);
         localStorage.setItem('isContinuousMode', String(newStatus));
-        if (newStatus) {
-            alert('✅ Modo Contínuo ativado! Ao iniciar a automação, o sistema irá gerar lotes de 7 artigos continuamente.');
-        } else {
-            alert('❌ Modo Contínuo desativado.');
-            isGenerationCancelled.current = true;
-        }
+        if (!newStatus) isGenerationCancelled.current = true;
+    };
+
+    const handleToggleScheduler = () => {
+        const newStatus = !isSchedulerEnabled;
+        setIsSchedulerEnabled(newStatus);
+        localStorage.setItem('isSchedulerEnabled', String(newStatus));
     };
 
     const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -853,52 +759,30 @@ const App: React.FC = () => {
             const year = date.getFullYear().toString();
             const month = (date.getMonth() + 1).toString();
             const day = date.getDate().toString();
-
             const matchesYear = !filter.year || year === filter.year;
             const matchesMonth = !filter.month || month === filter.month;
             const matchesDay = !filter.day || day === filter.day;
-            
             return matchesYear && matchesMonth && matchesDay;
-        } catch {
-            return false;
-        }
+        } catch { return false; }
     });
     
     return (
         <div className="container">
-            <ApiKeyModal
-                isOpen={isApiModalOpen}
-                onClose={() => setIsApiModalOpen(false)}
-                onSave={(keys) => {
-                    if (keys.gemini) localStorage.setItem('gemini_api_key', keys.gemini);
-                    if (keys.zenodo) setZenodoToken(keys.zenodo); // This will also save to localStorage via useEffect
-                    if (keys.xai) localStorage.setItem('xai_api_key', keys.xai);
-                    setIsApiModalOpen(false);
-                }}
-            />
+            <ApiKeyModal isOpen={isApiModalOpen} onClose={() => setIsApiModalOpen(false)} onSave={(keys) => { if (keys.gemini) localStorage.setItem('gemini_api_key', keys.gemini); if (keys.zenodo) setZenodoToken(keys.zenodo); if (keys.xai) localStorage.setItem('xai_api_key', keys.xai); setIsApiModalOpen(false); }} />
             <div className="main-header">
-                 <div className="flex justify-between items-center">
+                <div className="flex justify-between items-center">
                     <div>
                         <h1>🔬 Fluxo Integrado de Publicação Científica</h1>
                         <p>AI Paper Generator → LaTeX Compiler → Zenodo Uploader</p>
                     </div>
                     <button onClick={() => setIsApiModalOpen(true)} className="p-2 rounded-full hover:bg-gray-200 transition-colors" title="API Key Settings">
-                         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        </svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                     </button>
                 </div>
             </div>
 
             <div className="workflow-steps">
-                {WORKFLOW_STEPS.map(s => (
-                    <div className={getStepCardClass(s.id)} key={s.id} onClick={() => setStep(s.id)}>
-                        <div className="step-number">{s.id}</div>
-                        <div className="step-title">{s.title}</div>
-                        <div className="step-status">{s.status}</div>
-                    </div>
-                ))}
+                {WORKFLOW_STEPS.map(s => (<div className={getStepCardClass(s.id)} key={s.id} onClick={() => setStep(s.id)}><div className="step-number">{s.id}</div><div className="step-title">{s.title}</div><div className="step-status">{s.status}</div></div>))}
             </div>
 
             {step === 1 && (
@@ -908,78 +792,31 @@ const App: React.FC = () => {
                         <div>
                             <h3 className="text-lg font-semibold mb-3">Configurações</h3>
                             <div className="space-y-4">
-                                <div>
-                                    <label className="font-semibold block mb-2">Idioma:</label>
-                                    <LanguageSelector languages={LANGUAGES} selectedLanguage={language} onSelect={setLanguage} />
-                                </div>
-                                 <ModelSelector
-                                    models={AVAILABLE_MODELS}
-                                    selectedModel={analysisModel}
-                                    onSelect={setAnalysisModel}
-                                    label="Modelo Rápido (para análise e título):"
-                                 />
-                                <ModelSelector
-                                    models={AVAILABLE_MODELS}
-                                    selectedModel={generationModel}
-                                    onSelect={setGenerationModel}
-                                    label="Modelo Poderoso (para geração e melhoria):"
-                                />
-                                <div>
-                                    <label className="font-semibold block mb-2">Tamanho do Artigo:</label>
-                                    <PageSelector options={[12, 30, 60, 100]} selectedPageCount={pageCount} onSelect={setPageCount} />
-                                </div>
+                                <LanguageSelector languages={LANGUAGES} selectedLanguage={language} onSelect={setLanguage} />
+                                <ModelSelector models={AVAILABLE_MODELS} selectedModel={analysisModel} onSelect={setAnalysisModel} label="Modelo Rápido (para análise e título):" />
+                                <ModelSelector models={AVAILABLE_MODELS} selectedModel={generationModel} onSelect={setGenerationModel} label="Modelo Poderoso (para geração e melhoria):" />
+                                <PageSelector options={[12, 30, 60, 100]} selectedPageCount={pageCount} onSelect={setPageCount} />
                                 <div>
                                     <label className="font-semibold block mb-2">Número de Artigos a Gerar (Manual):</label>
-                                    <input
-                                        type="number"
-                                        min="1"
-                                        max="100"
-                                        value={numberOfArticles}
-                                        onChange={(e) => setNumberOfArticles(Math.max(1, Number(e.target.value)))}
-                                        className="w-full"
-                                        disabled={isContinuousMode}
-                                    />
+                                    <input type="number" min="1" max="100" value={numberOfArticles} onChange={(e) => setNumberOfArticles(Math.max(1, Number(e.target.value)))} className="w-full" disabled={isContinuousMode || isSchedulerEnabled} />
                                 </div>
                             </div>
                             <div className="mt-6 text-center">
-                                <ActionButton
-                                    onClick={() => handleFullAutomation()}
-                                    disabled={isGenerating}
-                                    isLoading={isGenerating}
-                                    text={`Iniciar Automação (${isContinuousMode ? 7 : numberOfArticles} Artigo${(isContinuousMode ? 7 : numberOfArticles) > 1 ? 's' : ''})`}
-                                    loadingText="Em Progresso..."
-                                    completed={isGenerationComplete}
-                                />
-                                {isGenerating && (
-                                    <button 
-                                        onClick={() => {
-                                            isGenerationCancelled.current = true;
-                                            setGenerationStatus("🔄 Cancelando após o artigo atual...");
-                                        }}
-                                        className="btn bg-red-600 text-white hover:bg-red-700 mt-4"
-                                    >
-                                        Cancelar Automação
-                                    </button>
-                                )}
+                                <ActionButton onClick={() => handleFullAutomation()} disabled={isGenerating} isLoading={isGenerating} text={`Iniciar Automação (${isContinuousMode || isSchedulerEnabled ? 7 : numberOfArticles} Artigo${(isContinuousMode || isSchedulerEnabled ? 7 : numberOfArticles) > 1 ? 's' : ''})`} loadingText="Em Progresso..." completed={isGenerationComplete} />
+                                {isGenerating && (<button onClick={() => { isGenerationCancelled.current = true; setGenerationStatus("🔄 Cancelando após o artigo atual..."); }} className="btn bg-red-600 text-white hover:bg-red-700 mt-4">Cancelar Automação</button>)}
                             </div>
                             
-                            <div className="mt-6 border-t pt-6">
-                                <h4 className="font-semibold text-center mb-3 text-gray-700">Automação Contínua (Loop)</h4>
-                                <div className="flex items-center justify-center gap-4">
-                                    <span className={`font-semibold transition-colors ${!isContinuousMode ? 'text-indigo-600' : 'text-gray-500'}`}>Desativado</span>
-                                    <label htmlFor="schedulerToggle" className="relative inline-flex items-center cursor-pointer">
-                                        <input
-                                            type="checkbox"
-                                            checked={isContinuousMode}
-                                            onChange={handleToggleContinuousMode}
-                                            id="schedulerToggle"
-                                            className="sr-only peer"
-                                        />
-                                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-                                    </label>
-                                    <span className={`font-semibold transition-colors ${isContinuousMode ? 'text-indigo-600' : 'text-gray-500'}`}>Ativado</span>
+                            <div className="mt-6 border-t pt-6 grid grid-cols-2 gap-4">
+                                <div>
+                                    <h4 className="font-semibold text-center mb-2 text-gray-700">Automação Contínua (Loop)</h4>
+                                    <div className="flex items-center justify-center gap-2"><span className={`font-semibold transition-colors ${!isContinuousMode ? 'text-indigo-600' : 'text-gray-500'}`}>Off</span><label htmlFor="continuousToggle" className="relative inline-flex items-center cursor-pointer"><input type="checkbox" checked={isContinuousMode} onChange={handleToggleContinuousMode} id="continuousToggle" className="sr-only peer" /><div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div></label><span className={`font-semibold transition-colors ${isContinuousMode ? 'text-indigo-600' : 'text-gray-500'}`}>On</span></div>
+                                    <p className="text-center text-xs text-gray-500 mt-1">Gera lotes de 7 artigos sem parar.</p>
                                 </div>
-                                <p className="text-center text-xs text-gray-500 mt-2">Quando ativado, gera lotes de 7 artigos continuamente.</p>
+                                 <div>
+                                    <h4 className="font-semibold text-center mb-2 text-gray-700">Agendamento Automático</h4>
+                                    <div className="flex items-center justify-center gap-2"><span className={`font-semibold transition-colors ${!isSchedulerEnabled ? 'text-indigo-600' : 'text-gray-500'}`}>Off</span><label htmlFor="schedulerToggle" className="relative inline-flex items-center cursor-pointer"><input type="checkbox" checked={isSchedulerEnabled} onChange={handleToggleScheduler} id="schedulerToggle" className="sr-only peer" /><div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div></label><span className={`font-semibold transition-colors ${isSchedulerEnabled ? 'text-indigo-600' : 'text-gray-500'}`}>On</span></div>
+                                    <p className="text-center text-xs text-gray-500 mt-1">Inicia lotes às 12h e 24h.</p>
+                                </div>
                             </div>
 
                         </div>
@@ -989,29 +826,14 @@ const App: React.FC = () => {
                                     <h3 className="text-lg font-semibold mb-3">Progresso da Geração</h3>
                                     <ProgressBar progress={generationProgress} isVisible={isGenerating} />
                                     <p className="text-center text-gray-600 mb-4">{generationStatus}</p>
-                                    
-                                    <div className="border-t pt-4 mt-4">
-                                        <h4 className="font-semibold mb-2">Resultados da Análise em Tempo Real</h4>
-                                        <ResultsDisplay analysisResults={analysisResults} totalIterations={TOTAL_ITERATIONS} />
-                                    </div>
-                                    <div className="border-t pt-4 mt-4">
-                                        <h4 className="font-semibold mb-2">Fontes Utilizadas</h4>
-                                        <SourceDisplay sources={paperSources} />
-                                    </div>
+                                    <div className="border-t pt-4 mt-4"><h4 className="font-semibold mb-2">Resultados da Análise em Tempo Real</h4><ResultsDisplay analysisResults={analysisResults} totalIterations={TOTAL_ITERATIONS} /></div>
+                                    <div className="border-t pt-4 mt-4"><h4 className="font-semibold mb-2">Fontes Utilizadas</h4><SourceDisplay sources={paperSources} /></div>
                                 </>
                             ) : (
                                 <div className="text-center p-8">
                                     <h3 className="text-xl font-semibold text-gray-700">Aguardando Início</h3>
-                                    <p className="text-gray-500 mt-2">
-                                        Configure as opções à esquerda e clique em "Iniciar Automação" para começar. O progresso aparecerá aqui.
-                                    </p>
-                                    {finalLatexCode && (
-                                        <div className="mt-6">
-                                             <button onClick={handleProceedToCompile} className="btn btn-success">
-                                                ✅ Geração Concluída! Ir para a Etapa 2
-                                            </button>
-                                        </div>
-                                    )}
+                                    <p className="text-gray-500 mt-2">Configure as opções e inicie a automação. O progresso aparecerá aqui.</p>
+                                    {finalLatexCode && (<div className="mt-6"><button onClick={handleProceedToCompile} className="btn btn-success">✅ Geração Concluída! Ir para a Etapa 2</button></div>)}
                                 </div>
                             )}
                         </div>
@@ -1023,71 +845,25 @@ const App: React.FC = () => {
                 <div className="card">
                     <h2>🖋️ Passo 2: Compilar & Revisar</h2>
                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                        <div>
-                             <LatexCompiler code={latexCode} onCodeChange={setLatexCode} />
-                        </div>
+                        <div><LatexCompiler code={latexCode} onCodeChange={setLatexCode} /></div>
                         <div>
                              <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm space-y-6 sticky top-5">
                                  <div>
                                     <h3 className="text-lg font-semibold text-gray-800 mb-3">Ferramentas de Formatação</h3>
                                     <div className="p-4 bg-gray-50 rounded-lg space-y-4">
-                                        <div>
-                                            <label className="font-semibold block mb-2">Guia de Estilo (Bibliografia):</label>
-                                            <StyleGuideSelector
-                                                guides={STYLE_GUIDES}
-                                                selectedGuide={selectedStyle}
-                                                onSelect={setSelectedStyle}
-                                            />
-                                        </div>
-                                        <button 
-                                            onClick={handleApplyStyleGuide}
-                                            disabled={isReformatting || isCompiling}
-                                            className="btn btn-primary w-full"
-                                        >
-                                            {isReformatting && <span className="spinner"></span>}
-                                            {isReformatting ? 'Aplicando Estilo...' : 'Aplicar Guia de Estilo'}
-                                        </button>
+                                        <div><label className="font-semibold block mb-2">Guia de Estilo (Bibliografia):</label><StyleGuideSelector guides={STYLE_GUIDES} selectedGuide={selectedStyle} onSelect={setSelectedStyle} /></div>
+                                        <button onClick={handleApplyStyleGuide} disabled={isReformatting || isCompiling} className="btn btn-primary w-full">{isReformatting && <span className="spinner"></span>}{isReformatting ? 'Aplicando Estilo...' : 'Aplicar Guia de Estilo'}</button>
                                     </div>
                                 </div>
-
                                 <div>
                                     <h3 className="text-lg font-semibold text-gray-800 mb-3">Opções de Compilação</h3>
                                     <div className="p-4 bg-gray-50 rounded-lg space-y-4">
-                                        <div className="flex items-center justify-around">
-                                            <label className="flex items-center cursor-pointer">
-                                                <input type="radio" name="compileMethod" value="texlive" checked={compileMethod === 'texlive'} onChange={() => setCompileMethod('texlive')} className="form-radio h-4 w-4 text-indigo-600"/>
-                                                <span className="ml-2 text-gray-700">Compilador Online (Recomendado)</span>
-                                            </label>
-                                            <label className="flex items-center cursor-pointer">
-                                                <input type="radio" name="compileMethod" value="overleaf" checked={compileMethod === 'overleaf'} onChange={() => setCompileMethod('overleaf')} className="form-radio h-4 w-4 text-indigo-600"/>
-                                                <span className="ml-2 text-gray-700">Enviar para Overleaf</span>
-                                            </label>
-                                        </div>
-
-                                        <button 
-                                            onClick={handleCompileLaTeX}
-                                            disabled={isCompiling || isReformatting}
-                                            className="btn btn-primary w-full"
-                                        >
-                                            {isCompiling && <span className="spinner"></span>}
-                                            {isCompiling ? 'Compilando...' : 'Compilar LaTeX'}
-                                        </button>
+                                        <div className="flex items-center justify-around"><label className="flex items-center cursor-pointer"><input type="radio" name="compileMethod" value="texlive" checked={compileMethod === 'texlive'} onChange={() => setCompileMethod('texlive')} className="form-radio h-4 w-4 text-indigo-600"/><span className="ml-2 text-gray-700">Compilador Online (Recomendado)</span></label><label className="flex items-center cursor-pointer"><input type="radio" name="compileMethod" value="overleaf" checked={compileMethod === 'overleaf'} onChange={() => setCompileMethod('overleaf')} className="form-radio h-4 w-4 text-indigo-600"/><span className="ml-2 text-gray-700">Enviar para Overleaf</span></label></div>
+                                        <button onClick={handleCompileLaTeX} disabled={isCompiling || isReformatting} className="btn btn-primary w-full">{isCompiling && <span className="spinner"></span>}{isCompiling ? 'Compilando...' : 'Compilar LaTeX'}</button>
                                     </div>
                                 </div>
-                                
                                 <div className="mt-4">{compilationStatus}</div>
-
-                                {pdfPreviewUrl && (
-                                    <div className="mt-4">
-                                        <h3 className="text-lg font-semibold text-gray-800 mb-2">Preview do PDF</h3>
-                                        <div className="iframe-container">
-                                            <iframe src={pdfPreviewUrl} title="PDF Preview"></iframe>
-                                        </div>
-                                        <button onClick={handleProceedToUpload} className="btn btn-success w-full mt-4">
-                                            Avançar para a Publicação
-                                        </button>
-                                    </div>
-                                )}
+                                {pdfPreviewUrl && (<div className="mt-4"><h3 className="text-lg font-semibold text-gray-800 mb-2">Preview do PDF</h3><div className="iframe-container"><iframe src={pdfPreviewUrl} title="PDF Preview"></iframe></div><button onClick={handleProceedToUpload} className="btn btn-success w-full mt-4">Avançar para a Publicação</button></div>)}
                             </div>
                         </div>
                     </div>
@@ -1098,57 +874,8 @@ const App: React.FC = () => {
                  <div className="card">
                      <h2>🚀 Passo 3: Publicar no Zenodo</h2>
                      <div className="max-w-3xl mx-auto">
-                        <ZenodoUploader
-                            ref={uploaderRef}
-                            title={extractedMetadata.title}
-                            abstractText={extractedMetadata.abstract}
-                            keywords={extractedMetadata.keywords}
-                            authors={extractedMetadata.authors}
-                            compiledPdfFile={compiledPdfFile}
-                            onFileSelect={() => { /* Managed by parent */ }}
-                            onPublishStart={() => {
-                                setIsUploading(true);
-                                setUploadStatus(<div className="status-message status-info">⏳ Publicando...</div>);
-                            }}
-                            onPublishSuccess={(result) => {
-                                setUploadStatus(
-                                    <div className="status-message status-success">
-                                        <p>✅ Publicado com sucesso!</p>
-                                        <p><strong>DOI:</strong> {result.doi}</p>
-                                        <p>
-                                            <strong>Link:</strong> <a href={result.zenodoLink} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">{result.zenodoLink}</a>
-                                        </p>
-                                    </div>
-                                );
-                                // Find the entry that was being published and update its status
-                                setArticleEntries(prev => prev.map(entry => {
-                                    if (entry.title === extractedMetadata.title && entry.status !== 'published') { // Basic match, might need more robust ID
-                                        return {
-                                            ...entry,
-                                            status: 'published',
-                                            doi: result.doi,
-                                            link: result.zenodoLink,
-                                            date: new Date().toISOString(),
-                                            latexCode: undefined, // Clear LaTeX code once published
-                                            errorMessage: undefined,
-                                        };
-                                    }
-                                    return entry;
-                                }));
-                            }}
-                            onPublishError={(message) => setUploadStatus(<div className="status-message status-error">❌ {message}</div>)}
-                            extractedMetadata={extractedMetadata}
-                         />
-                         
-                         <div className="mt-6 text-center">
-                            <ActionButton
-                                onClick={() => uploaderRef.current?.submit()}
-                                disabled={isUploading}
-                                isLoading={isUploading}
-                                text="Publicar Agora"
-                                loadingText="Publicando..."
-                            />
-                        </div>
+                        <ZenodoUploader ref={uploaderRef} title={extractedMetadata.title} abstractText={extractedMetadata.abstract} keywords={extractedMetadata.keywords} authors={extractedMetadata.authors} compiledPdfFile={compiledPdfFile} onFileSelect={() => {}} onPublishStart={() => { setIsUploading(true); setUploadStatus(<div className="status-message status-info">⏳ Publicando...</div>); }} onPublishSuccess={(result) => { setUploadStatus(<div className="status-message status-success"><p>✅ Publicado com sucesso!</p><p><strong>DOI:</strong> {result.doi}</p><p><strong>Link:</strong> <a href={result.zenodoLink} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">{result.zenodoLink}</a></p></div>); setArticleEntries(prev => prev.map(entry => { if (entry.title === extractedMetadata.title && entry.status !== 'published') { return { ...entry, status: 'published', doi: result.doi, link: result.zenodoLink, date: new Date().toISOString(), latexCode: undefined, errorMessage: undefined, }; } return entry; })); }} onPublishError={(message) => setUploadStatus(<div className="status-message status-error">❌ {message}</div>)} extractedMetadata={extractedMetadata} />
+                         <div className="mt-6 text-center"><ActionButton onClick={() => uploaderRef.current?.submit()} disabled={isUploading} isLoading={isUploading} text="Publicar Agora" loadingText="Publicando..." /></div>
                         <div className="mt-4">{uploadStatus}</div>
                      </div>
                  </div>
@@ -1158,24 +885,16 @@ const App: React.FC = () => {
                 <div className="card">
                     <h2>📚 Passo 4: Artigos Publicados</h2>
                     <div className="mb-6 p-4 bg-gray-50 rounded-lg border">
-                        <h3 className="font-semibold mb-2">Filtrar por Data de Publicação</h3>
+                        <h3 className="font-semibold mb-2">Filtrar por Data de Publicação/Tentativa</h3>
                         <div className="flex flex-wrap items-center gap-4">
                             <input type="text" name="day" value={filter.day} onChange={handleFilterChange} placeholder="Dia (ex: 5)" className="w-24"/>
                             <input type="text" name="month" value={filter.month} onChange={handleFilterChange} placeholder="Mês (ex: 8)" className="w-24"/>
                             <input type="text" name="year" value={filter.year} onChange={handleFilterChange} placeholder="Ano (ex: 2024)" className="w-32"/>
                         </div>
                     </div>
-
                     <div className="overflow-x-auto">
                          <table className="min-w-full bg-white border border-gray-200">
-                            <thead className="bg-gray-100">
-                                <tr>
-                                    <th className="py-3 px-4 text-left font-semibold text-gray-600">Título do Artigo</th>
-                                    <th className="py-3 px-4 text-left font-semibold text-gray-600">Data de Publicação/Tentativa</th>
-                                    <th className="py-3 px-4 text-left font-semibold text-gray-600">Status</th>
-                                    <th className="py-3 px-4 text-left font-semibold text-gray-600">Link/Ação</th>
-                                </tr>
-                            </thead>
+                            <thead className="bg-gray-100"><tr><th className="py-3 px-4 text-left font-semibold text-gray-600">Título do Artigo</th><th className="py-3 px-4 text-left font-semibold text-gray-600">Data</th><th className="py-3 px-4 text-left font-semibold text-gray-600">Status</th><th className="py-3 px-4 text-left font-semibold text-gray-600">Link/Ação</th></tr></thead>
                             <tbody>
                                 {filteredArticleEntries.length > 0 ? filteredArticleEntries.map((article) => (
                                     <tr key={article.id} className="border-b hover:bg-gray-50">
@@ -1188,34 +907,13 @@ const App: React.FC = () => {
                                             {article.errorMessage && <p className="text-xs text-gray-500 mt-1">{article.errorMessage}</p>}
                                         </td>
                                         <td className="py-3 px-4">
-                                            {article.status === 'published' && article.link ? (
-                                                <a href={article.link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">
-                                                    {article.doi || "Ver DOI"}
-                                                </a>
-                                            ) : (
-                                                <button 
-                                                    onClick={() => handleRepublishPending(article.id)}
-                                                    disabled={isRepublishingId === article.id || !article.latexCode}
-                                                    className="px-3 py-1 text-sm font-semibold text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
-                                                >
-                                                    {isRepublishingId === article.id && <span className="spinner w-4 h-4"></span>}
-                                                    {isRepublishingId === article.id ? 'Publicando...' : 'Publicar Artigo'}
-                                                </button>
-                                            )}
+                                            {article.status === 'published' && article.link ? (<a href={article.link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">{article.doi || "Ver DOI"}</a>) : (<button onClick={() => handleRepublishPending(article.id)} disabled={isRepublishingId === article.id || !article.latexCode} className="px-3 py-1 text-sm font-semibold text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-1">{isRepublishingId === article.id && <span className="spinner w-4 h-4"></span>}{isRepublishingId === article.id ? 'Publicando...' : 'Publicar Artigo'}</button>)}
                                         </td>
                                     </tr>
-                                )) : (
-                                    <tr>
-                                        <td colSpan={4} className="text-center py-8 text-gray-500">Nenhum artigo encontrado.</td>
-                                    </tr>
-                                )}
+                                )) : (<tr><td colSpan={4} className="text-center py-8 text-gray-500">Nenhum artigo encontrado.</td></tr>)}
                             </tbody>
                         </table>
-                        {isRepublishingId && uploadStatus && (
-                            <div className="mt-4 p-3 border-l-4 border-indigo-500 bg-indigo-50 text-indigo-800">
-                                {uploadStatus}
-                            </div>
-                        )}
+                        {isRepublishingId && uploadStatus && (<div className="mt-4 p-3 border-l-4 border-indigo-500 bg-indigo-50 text-indigo-800">{uploadStatus}</div>)}
                     </div>
                 </div>
             )}
