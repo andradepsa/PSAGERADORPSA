@@ -1,5 +1,6 @@
 
 
+
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Language, AnalysisResult, PaperSource, StyleGuide } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES } from '../constants';
@@ -196,10 +197,9 @@ export async function generateInitialPaper(title: string, language: Language, pa
 4.  **Language:** The entire paper must be written in **${languageName}**.
 5.  **Output Format:** The entire output MUST be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) around the LaTeX code.
 6.  **CRITICAL RULE - AVOID AMPERSAND:** To prevent compilation errors, you **MUST NOT** use the ampersand character ('&').
-    -   In the bibliography/reference section, use the word 'and' to separate author names.
+    -   In the bibliography/reference section, you MUST use the word 'and' to separate author names.
     -   **Example (Incorrect):** "Smith, J. & Doe, J."
     -   **Example (Correct):** "Smith, J. and Doe, J."
-    -   In the main body of the text, prefer using 'and'. If you absolutely must use an ampersand, you must escape it as \`\\&\`.
 7.  **CRITICAL RULE - OTHER CHARACTERS:** You must also properly escape other special LaTeX characters like '%', '$', '#', '_', '{', '}'. For example, an underscore must be written as \`\\_\`.
 8.  **CRITICAL RULE - NO URLs:** References must **NOT** contain any URLs or web links. Format them as academic citations only, without any \`\\url{}\` commands.
 9.  **CRITICAL RULE - METADATA:** Do NOT place complex content inside the \`\\hypersetup{...}\` command. Only the title and author should be there.
@@ -245,37 +245,40 @@ ${templateWithBabel}
 }
 
 export async function analyzePaper(paperContent: string, pageCount: number, model: string): Promise<AnalysisResult> {
-    const analysisTopicsList = ANALYSIS_TOPICS.map(t => `- ${t.name}: ${t.desc}`).join('\n');
+    const analysisTopicsList = ANALYSIS_TOPICS.map(t => `- Topic ${t.num} (${t.name}): ${t.desc}`).join('\n');
     const systemInstruction = `You are an expert academic reviewer AI. Your task is to perform a rigorous, objective, and multi-faceted analysis of a provided scientific paper written in LaTeX.
 
-    **Input:** You will receive the full LaTeX source code of a scientific paper.
+    **Input:** You will receive the full LaTeX source code of a scientific paper and a list of analysis topics with numeric identifiers.
     
     **Task:**
-    1.  Analyze the paper based on the following 28 quality criteria.
+    1.  Analyze the paper based on the provided quality criteria.
     2.  For each criterion, provide a numeric score from 0.0 to 10.0, where 10.0 is flawless.
     3.  For each criterion, provide a concise, single-sentence improvement suggestion. This suggestion must be a direct critique of the paper's current state and offer a clear path for enhancement. Do NOT write generic praise. Be critical and specific.
-    4.  The "PAGE COUNT COMPLIANCE" topic must be evaluated based on the user's requested page count of ${pageCount}. A perfect score of 10 is achieved if the paper is exactly ${pageCount} pages long. The score should decrease linearly based on the deviation from this target. For example, if the paper is ${pageCount - 2} or ${pageCount + 2} pages, the score might be around 8.0. If it's ${pageCount - 5} or ${pageCount + 5}, the score might be around 5.0.
+    4.  The "PAGE COUNT" topic (Topic 28) must be evaluated based on the user's requested page count of ${pageCount}. A perfect score of 10 is achieved if the paper is exactly ${pageCount} pages long. The score should decrease linearly based on the deviation from this target. For example, if the paper is ${pageCount - 2} or ${pageCount + 2} pages, the score might be around 8.0.
 
     **Output Format:**
     -   You MUST return your analysis as a single, valid JSON object.
     -   Do NOT include any text, explanations, or markdown formatting (like \`\`\`json) outside of the JSON object.
     -   The JSON object must have a single key "analysis" which is an array of objects.
     -   Each object in the array must have three keys:
-        1.  "topicName": The name of the topic being analyzed (string).
+        1.  "topicNum": The numeric identifier of the topic being analyzed (number).
         2.  "score": The numeric score from 0.0 to 10.0 (number).
         3.  "improvement": The single-sentence improvement suggestion (string).
+
+    **Analysis Topics:**
+    ${analysisTopicsList}
 
     **Example Output:**
     \`\`\`json
     {
       "analysis": [
         {
-          "topicName": "TOPIC FOCUS",
+          "topicNum": 0,
           "score": 8.5,
           "improvement": "The discussion section slightly deviates into an unrelated sub-topic that should be removed to maintain focus."
         },
         {
-          "topicName": "WRITING CLARITY",
+          "topicNum": 1,
           "score": 7.8,
           "improvement": "Several paragraphs contain run-on sentences that should be split for better readability."
         }
@@ -292,11 +295,11 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
                 items: {
                     type: Type.OBJECT,
                     properties: {
-                        topicName: { type: Type.STRING },
+                        topicNum: { type: Type.NUMBER },
                         score: { type: Type.NUMBER },
                         improvement: { type: Type.STRING },
                     },
-                    required: ["topicName", "score", "improvement"],
+                    required: ["topicNum", "score", "improvement"],
                 },
             },
         },
@@ -323,7 +326,11 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
     const improvementPoints = analysis.analysis
         .filter(item => item.score < 8.5)
-        .map(item => `- **${item.topicName} (Score: ${item.score})**: ${item.improvement}`)
+        .map(item => {
+            const topic = ANALYSIS_TOPICS.find(t => t.num === item.topicNum);
+            const topicName = topic ? topic.name : `UNKNOWN TOPIC (${item.topicNum})`;
+            return `- **${topicName} (Score: ${item.score})**: ${item.improvement}`;
+        })
         .join('\n');
 
     const systemInstruction = `You are a world-class AI assistant specialized in editing and improving scientific papers written in LaTeX. Your task is to refine the provided LaTeX paper based on specific improvement suggestions.
@@ -336,6 +343,7 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     -   The entire output MUST be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) before \`\\documentclass\` or after \`\\end{document}\`.
     -   The language of the entire paper must remain in **${languageName}**.
     -   **CRITICAL: Absolutely DO NOT use the \`\\begin{thebibliography}\`, \`\\end{thebibliography}\`, or \`\\bibitem\` commands anywhere in the document. The references MUST be formatted as a plain, unnumbered list directly following \`\\section{Referências}\`.**
+    -   **CRITICAL RULE - AVOID AMPERSAND:** You **MUST NOT** use the ampersand character ('&'). Use the word 'and' instead, especially for separating author names.
     -   **Do NOT use the \`\\cite{}\` command anywhere in the text.**
     -   **Do NOT add or remove \`\\newpage\` commands. Let the LaTeX engine handle page breaks automatically.**
     -   **Crucially, do NOT include any images, figures, organograms, flowcharts, diagrams, or complex tables in the improved paper.**
@@ -364,8 +372,8 @@ export async function fixLatexPaper(paperContent: string, compilationError: stri
     2.  Your task is to identify the root cause of the error and correct **ONLY** the necessary lines in the LaTeX code to resolve it.
     3.  **DO NOT** rewrite or refactor large sections of the document. Make the smallest change possible.
     4.  The entire output **MUST** be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) before \`\\documentclass\` or after \`\\end{document}\`.
-    5.  **HIGHEST PRIORITY:** If the error message is "Misplaced alignment tab character &", the problem is an unescaped ampersand ('&'). Your primary action MUST be to find every instance of '&' and replace it with the word 'and', especially in the reference list. Example Fix: Change "Bondal, A., & Orlov, D." to "Bondal, A., and Orlov, D.".
-    6.  Generally maintain the preamble, BUT if the compilation error is directly related to the preamble (especially the \\hypersetup command or metadata), you MUST fix it by removing the problematic fields.
+    5.  **HIGHEST PRIORITY:** If the error message is "Misplaced alignment tab character &", the problem is an unescaped ampersand ('&'). Your primary action MUST be to find every instance of '&' and replace it with the word 'and', especially in the reference list. Example Fix: Change "Bondal, A., & Orlov, D." to "Bondal, A. and Orlov, D.". This is the most common and critical error to fix.
+    6.  Generally maintain the preamble, BUT if the compilation error is directly related to the preamble (especially the \\hypersetup command or metadata), you MUST fix it by removing or simplifying the problematic fields.
     7.  **DO NOT** use commands like \`\\begin{thebibliography}\`, \`\\bibitem\`, or \`\\cite{}\`.
     8.  **DO NOT** add or remove \`\\newpage\` commands.
     9.  **DO NOT** include any images, figures, or complex tables.
@@ -407,12 +415,13 @@ export async function reformatPaperWithStyleGuide(paperContent: string, styleGui
 
     **CRITICAL INSTRUCTIONS:**
     1.  You will receive the full LaTeX source code of a paper.
-    2.  Your task is to reformat **ONLY** the content within the \`\\section{Referências}\` section.
+    2.  Your task is to reformat **ONLY** the content within the \`\\section{Referências}\` or \`\\section{References}\` section.
     3.  You **MUST NOT** change any other part of the document. The preamble, abstract, body text, conclusion, etc., must remain absolutely identical to the original.
     4.  The new reference list must strictly adhere to the **${styleGuideInfo.name} (${styleGuideInfo.description})** formatting rules.
-    5.  The number of references in the output must be the same as in the input.
-    6.  The final output must be the **COMPLETE, FULL** LaTeX document, with only the reference section's content modified. Do not provide only the reference section or include any explanatory text or markdown formatting.
-    7.  **CRITICAL: Ensure that no URLs or web links are present in the reformatted references. All references must be formatted as academic citations only, without any \\url{} commands or direct links.**
+    5.  **CRITICAL RULE - AVOID AMPERSAND:** You **MUST NOT** use the ampersand character ('&'). Use the word 'and' to separate author names.
+    6.  The number of references in the output must be the same as in the input.
+    7.  The final output must be the **COMPLETE, FULL** LaTeX document, with only the reference section's content modified. Do not provide only the reference section or include any explanatory text or markdown formatting.
+    8.  **CRITICAL: Ensure that no URLs or web links are present in the reformatted references. All references must be formatted as academic citations only, without any \\url{} commands or direct links.**
     `;
 
     const userPrompt = `Please reformat the references in the following LaTeX document to conform to the ${styleGuideInfo.name} style guide. Return the full, unchanged document with only the reference list updated.

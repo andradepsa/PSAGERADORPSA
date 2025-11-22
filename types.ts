@@ -1,4 +1,5 @@
 
+
 export type Language = 'en' | 'pt' | 'es' | 'fr';
 
 export interface LanguageOption {
@@ -26,7 +27,7 @@ export interface IterationAnalysis {
 }
 
 export interface AnalysisItem {
-    topicName: string;
+    topicNum: number;
     score: number;
     improvement: string;
 }

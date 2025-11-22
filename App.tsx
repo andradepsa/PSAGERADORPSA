@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useRef } from 'react';
 import { generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide } from './services/geminiService';
 import type { Language, IterationAnalysis, PaperSource, AnalysisResult, StyleGuide, ArticleEntry } from './types';
@@ -358,7 +359,7 @@ const App: React.FC = () => {
                     const iterationData: IterationAnalysis = {
                         iteration: iter,
                         results: analysisResult.analysis.map(res => ({
-                            topic: ANALYSIS_TOPICS.find(t => t.name === res.topicName) || { num: -1, name: 'Unknown', desc: '' },
+                            topic: ANALYSIS_TOPICS.find(t => t.num === res.topicNum) || { num: -1, name: 'Unknown', desc: '' },
                             score: res.score,
                             scoreClass: getScoreClass(res.score),
                             improvement: res.improvement
