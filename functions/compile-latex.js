@@ -50,11 +50,13 @@ export async function onRequestPost(context) {
             let detailedError = "Compilation failed. The TeXLive.net server did not return a PDF.";
             
             if (logMatch && logMatch[1]) {
-                // Return a generous chunk of the log so the AI can analyze it
-                detailedError = `TeX Live Error Log:\n${logMatch[1].substring(0, 3000)}`; 
+                // Return a generous chunk of the log so the AI can analyze it. 
+                // Increased from 3000 to 15000 to ensure we catch errors buried deep in verbose logs.
+                detailedError = `TeX Live Error Log:\n${logMatch[1].substring(0, 15000)}`; 
             } else {
-                // Fallback: return the raw HTML (truncated)
-                detailedError = `Compilation failed. Upstream response:\n${errorLogHtml.substring(0, 1000)}`;
+                // Fallback: return the raw HTML (truncated less aggressively)
+                // Increased from 1000 to 5000.
+                detailedError = `Compilation failed. Upstream response:\n${errorLogHtml.substring(0, 5000)}`;
             }
             
             return new Response(JSON.stringify({ error: detailedError }), {

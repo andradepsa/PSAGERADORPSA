@@ -1,18 +1,19 @@
 
-
-
 // services/articleTemplate.ts
 
 export const ARTICLE_TEMPLATE = `\\documentclass[12pt,a4paper]{article}
-\\usepackage[utf8]{inputenc}
 \\usepackage[T1]{fontenc}
 \\usepackage{amsmath, amssymb, geometry, setspace, url, verbatim}
-\\usepackage{hyperref}
 % Babel package will be added dynamically based on language
+\\usepackage[unicode=true]{hyperref}
 
 \\hypersetup{
   pdftitle={[INSERT NEW TITLE HERE]},
-  pdfauthor={SÉRGIO DE ANDRADE, PAULO}
+  pdfauthor={SÉRGIO DE ANDRADE, PAULO},
+  colorlinks=true,
+  linkcolor=blue,
+  citecolor=blue,
+  urlcolor=blue
 }
 
 \\title{[INSERT NEW TITLE HERE]}
