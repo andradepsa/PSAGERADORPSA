@@ -44,7 +44,7 @@ const App: React.FC = () => {
 
     // == STEP 1: GENERATION STATE ==
     const [language, setLanguage] = useState<Language>('en');
-    const [generationModel, setGenerationModel] = useState('gemini-2.5-flash');
+    const [generationModel, setGenerationModel] = useState('gemini-2.5-pro');
     const [analysisModel, setAnalysisModel] = useState('gemini-2.5-flash');
     const [pageCount, setPageCount] = useState(12);
     const [isGenerating, setIsGenerating] = useState(false);
