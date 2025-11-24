@@ -233,7 +233,7 @@ export async function generateInitialPaper(title: string, language: Language, pa
     -   \`[INSERT COMMA-SEPARATED KEYWORDS HERE]\`: Provide new keywords relevant to the title.
     -   \`[INSERT NEW CONTENT FOR ... SECTION HERE]\`: Write substantial, high-quality academic content for each section (Introduction, Literature Review, etc.) to generate a paper of approximately **${pageCount} pages**.
     -   \`[INSERT REFERENCE 1 HERE]\` through \`[INSERT REFERENCE ${referenceCount} HERE]\`: For each of these placeholders, generate a single, unique academic reference relevant to the title. **Use Google Search grounding and the provided "Additional Academic Sources from Semantic Scholar" for this. Prioritize the quality and academic rigor of the Semantic Scholar sources first for references.** Each generated reference must be a plain paragraph, for example, starting with \`\\noindent\` and ending with \`\\par\`. Do NOT use \`\\bibitem\` or \`thebibliography\`.
-3.  **Strictly Adhere to Structure:** Do NOT modify the LaTeX structure provided in the template. Do not add or remove packages, or alter the section commands. **CRITICAL: The \\author{} and \\date{} commands in the template, which already contain the author information, MUST NOT be changed or overwritten. Use them exactly as provided.** The only exception is adding the correct babel package for the language.
+3.  **Strictly Adhere to Structure:** Do NOT modify the LaTeX structure provided in the template. Do not add or remove packages, or alter the section commands. **CRITICAL: The \\author{} and \\date{} commands and their content (e.g., __AUTHOR_NAME_PLACEHOLDER__) are pre-filled by the application and should be preserved verbatim by the LLM. Do NOT change or overwrite them.** The only exception is adding the correct babel package for the language.
 4.  **Language:** The entire paper must be written in **${languageName}**.
 5.  **Output Format:** The entire output MUST be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) around the LaTeX code.
 6.  **CRITICAL RULE - AVOID AMPERSAND:** To prevent compilation errors, you **MUST NOT** use the ampersand character ('&').
@@ -257,17 +257,18 @@ export async function generateInitialPaper(title: string, language: Language, pa
         referencePlaceholders
     );
 
-    // Replace dynamic author information
+    // Replace dynamic author information using new, client-side only placeholders
     templateWithBabelAndAuthor = templateWithBabelAndAuthor.replace(
-        '[INSERT AUTHOR NAME]',
+        /__AUTHOR_NAME_PLACEHOLDER__/g, // Use global regex to replace all instances
         authorDetails.name
     );
     templateWithBabelAndAuthor = templateWithBabelAndAuthor.replace(
-        '[INSERT ORCID COMMAND]',
+        '__AUTHOR_ORCID_COMMAND_PLACEHOLDER__',
         authorDetails.orcid ? `\\small ORCID: \\url{https://orcid.org/${authorDetails.orcid}}` : ''
     );
+    // The pdfauthor in hypersetup also uses __AUTHOR_NAME_PLACEHOLDER__
     templateWithBabelAndAuthor = templateWithBabelAndAuthor.replace(
-        'pdfauthor={[INSERT AUTHOR NAME]}',
+        'pdfauthor={__AUTHOR_NAME_PLACEHOLDER__}',
         `pdfauthor={${authorDetails.name}}`
     );
 
@@ -395,7 +396,7 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     -   Critically analyze the provided "Current Paper Content" against the "Improvement Points".
     -   Apply the necessary changes directly to the LaTeX source code to address each improvement point.
     -   Ensure that the scientific content remains accurate and coherent.
-    -   Maintain the exact LaTeX preamble, author information, title, and metadata structure as in the original. Do NOT change \\documentclass, \\usepackage, \\hypersetup, \\title, \\author, \\date, \\maketitle.
+    -   Maintain the exact LaTeX preamble, author information, title, and metadata structure as in the original. Do NOT change \\documentclass, \\usepackage, \\hypersetup, \\title, \\author, \\date. **CRITICAL: The \\author{} and \\date{} commands and their content (e.g., __AUTHOR_NAME_PLACEHOLDER__) are pre-filled by the application and should be preserved verbatim by the LLM. Do NOT change or overwrite them.**
     -   The entire output MUST be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) before \`\\documentclass\` or after \`\\end{document}\`.
     -   The language of the entire paper must remain in **${languageName}**.
     -   **CRITICAL: Absolutely DO NOT use the \`\\begin{thebibliography}\`, \`\\end{thebibliography}\`, or \`\\bibitem\` commands anywhere in the document. The references MUST be formatted as a plain, unnumbered list directly following \`\\section{Referências}\`.**
@@ -429,7 +430,7 @@ export async function fixLatexPaper(paperContent: string, compilationError: stri
     3.  **DO NOT** rewrite or refactor large sections of the document. Make the smallest change possible.
     4.  The entire output **MUST** be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) before \`\\documentclass\` or after \`\\end{document}\`.
     5.  **HIGHEST PRIORITY:** If the error message is "Misplaced alignment tab character &", the problem is an unescaped ampersand ('&'). Your primary action MUST be to find every instance of '&' and replace it with the word 'and', especially in the reference list. Example Fix: Change "Bondal, A., & Orlov, D." to "Bondal, A. and Orlov, D.". This is the most common and critical error to fix.
-    6.  Generally maintain the preamble, BUT if the compilation error is directly related to the preamble (especially the \\hypersetup command or metadata), you MUST fix it by removing or simplifying the problematic fields.
+    6.  Generally maintain the preamble, BUT if the compilation error is directly related to the preamble (especially the \\hypersetup command or metadata), you MUST fix it by removing or simplifying the problematic fields. **CRITICAL: The \\author{} and \\date{} commands and their content (e.g., __AUTHOR_NAME_PLACEHOLDER__) are pre-filled by the application and should be preserved verbatim by the LLM. Do NOT change or overwrite them.**
     7.  **DO NOT** use commands like \`\\begin{thebibliography}\`, \`\\bibitem\`, or \`\\cite{}\`.
     8.  **DO NOT** add or remove \`\\newpage\` commands.
     9.  **DO NOT** include any images, figures, or complex tables.
@@ -472,7 +473,7 @@ export async function reformatPaperWithStyleGuide(paperContent: string, styleGui
     **CRITICAL INSTRUCTIONS:**
     1.  You will receive the full LaTeX source code of a paper.
     2.  Your task is to reformat **ONLY** the content within the \`\\section{Referências}\` or \`\\section{References}\` section.
-    3.  You **MUST NOT** change any other part of the document. The preamble, abstract, body text, conclusion, etc., must remain absolutely identical to the original.
+    3.  You **MUST NOT** change any other part of the document. The preamble, abstract, body text, conclusion, etc., must remain absolutely identical to the original. **CRITICAL: The \\author{} and \\date{} commands and their content (e.g., __AUTHOR_NAME_PLACEHOLDER__) are pre-filled by the application and should be preserved verbatim by the LLM. Do NOT change or overwrite them.**
     4.  The new reference list must strictly adhere to the **${styleGuideInfo.name} (${styleGuideInfo.description})** formatting rules.
     5.  **CRITICAL RULE - AVOID AMPERSAND:** You **MUST NOT** use the ampersand character ('&'). Use the word 'and' to separate author names.
     6.  The number of references in the output must be the same as in the input.

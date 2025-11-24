@@ -10,7 +10,7 @@ export const ARTICLE_TEMPLATE = `\\documentclass[12pt,a4paper]{article}
 
 \\hypersetup{
   pdftitle={[INSERT NEW TITLE HERE]},
-  pdfauthor={[INSERT AUTHOR NAME]},
+  pdfauthor={__AUTHOR_NAME_PLACEHOLDER__},
   colorlinks=true,
   linkcolor=blue,
   citecolor=blue,
@@ -20,8 +20,8 @@ export const ARTICLE_TEMPLATE = `\\documentclass[12pt,a4paper]{article}
 \\title{[INSERT NEW TITLE HERE]}
 
 \\author{
-  [INSERT AUTHOR NAME] \\\\
-  [INSERT ORCID COMMAND]
+  __AUTHOR_NAME_PLACEHOLDER__ \\\\
+  __AUTHOR_ORCID_COMMAND_PLACEHOLDER__
 }
 
 \\date{}
