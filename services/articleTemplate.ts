@@ -10,7 +10,7 @@ export const ARTICLE_TEMPLATE = `\\documentclass[12pt,a4paper]{article}
 
 \\hypersetup{
   pdftitle={[INSERT NEW TITLE HERE]},
-  pdfauthor={SÉRGIO DE ANDRADE, PAULO},
+  pdfauthor={[INSERT AUTHOR NAME]},
   colorlinks=true,
   linkcolor=blue,
   citecolor=blue,
@@ -20,8 +20,8 @@ export const ARTICLE_TEMPLATE = `\\documentclass[12pt,a4paper]{article}
 \\title{[INSERT NEW TITLE HERE]}
 
 \\author{
-  SÉRGIO DE ANDRADE, PAULO \\\\
-  \\small ORCID: \\url{https://orcid.org/0009-0004-2555-3178}
+  [INSERT AUTHOR NAME] \\\\
+  [INSERT ORCID COMMAND]
 }
 
 \\date{}

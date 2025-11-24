@@ -1,9 +1,7 @@
-
-
 import React, { useState, useEffect, useRef } from 'react';
 import { generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide } from './services/geminiService';
-import type { Language, IterationAnalysis, PaperSource, AnalysisResult, StyleGuide, ArticleEntry } from './types';
-import { LANGUAGES, AVAILABLE_MODELS, ANALYSIS_TOPICS, MATH_TOPICS, FIX_OPTIONS, STYLE_GUIDES, TOTAL_ITERATIONS } from './constants';
+import type { Language, IterationAnalysis, PaperSource, AnalysisResult, StyleGuide, ArticleEntry, PersonalData } from './types';
+import { LANGUAGES, AVAILABLE_MODELS, ANALYSIS_TOPICS, ALL_TOPICS_BY_DISCIPLINE, getAllDisciplines, getRandomTopic, FIX_OPTIONS, STYLE_GUIDES, TOTAL_ITERATIONS } from './constants';
 
 
 import LanguageSelector from './components/LanguageSelector';
@@ -18,6 +16,7 @@ import ApiKeyModal from './components/ApiKeyModal';
 import StyleGuideSelector from './components/StyleGuideSelector';
 // Fix: Import ZenodoUploader component and its Ref type to resolve the "Cannot find name 'ZenodoUploader'" error.
 import ZenodoUploader, { type ZenodoUploaderRef } from './components/ZenodoUploader';
+import PersonalDataModal from './components/PersonalDataModal'; // Import the new PersonalDataModal
 
 // This is needed for the pdf.js script loaded in index.html
 declare const pdfjsLib: any;
@@ -41,6 +40,7 @@ const App: React.FC = () => {
     // Overall workflow step
     const [step, setStep] = useState(1);
     const [isApiModalOpen, setIsApiModalOpen] = useState(false);
+    const [isPersonalDataModalOpen, setIsPersonalDataModalOpen] = useState(false); // New state for personal data modal
 
     // == STEP 1: GENERATION STATE ==
     const [language, setLanguage] = useState<Language>('en');
@@ -66,6 +66,8 @@ const App: React.FC = () => {
             return [];
         }
     });
+    const [selectedDiscipline, setSelectedDiscipline] = useState<string>(getAllDisciplines()[0]); // Default to the first discipline
+
 
     // == STEP 2: COMPILE STATE ==
     const [latexCode, setLatexCode] = useState(`% O código LaTeX gerado aparecerá aqui.`);
@@ -92,6 +94,11 @@ const App: React.FC = () => {
     const [uploadStatus, setUploadStatus] = useState<React.ReactNode>(null);
     const [keywordsInput, setKeywordsInput] = useState('');
     
+    // State for author personal data, loaded from localStorage
+    const [authorName, setAuthorName] = useState(() => localStorage.getItem('author_name') || 'SÉRGIO DE ANDRADE, PAULO');
+    const [authorAffiliation, setAuthorAffiliation] = useState(() => localStorage.getItem('author_affiliation') || 'Faculdade de Guarulhos (FG)');
+    const [authorOrcid, setAuthorOrcid] = useState(() => localStorage.getItem('author_orcid') || '0009-0004-2555-3178');
+
     // == AUTOMATION & SCHEDULER STATE ==
     const [isContinuousMode, setIsContinuousMode] = useState(() => {
         return localStorage.getItem('isContinuousMode') === 'true';
@@ -121,6 +128,13 @@ const App: React.FC = () => {
             localStorage.removeItem('zenodo_api_key');
         }
     }, [zenodoToken]);
+
+    // Effect to save author personal data to localStorage
+    useEffect(() => {
+        localStorage.setItem('author_name', authorName);
+        localStorage.setItem('author_affiliation', authorAffiliation);
+        localStorage.setItem('author_orcid', authorOrcid);
+    }, [authorName, authorAffiliation, authorOrcid]);
 
     // Effect to save all article entries to localStorage
     useEffect(() => {
@@ -294,6 +308,13 @@ const App: React.FC = () => {
         }
         setZenodoToken(storedToken);
 
+        // Check if author details are present
+        if (!authorName || !authorAffiliation || !authorOrcid) {
+            alert('❌ Dados pessoais do autor (Nome, Afiliação, ORCID) não encontrados! Por favor, configure-os no ícone de "pessoa" antes de iniciar.');
+            setIsPersonalDataModalOpen(true);
+            return;
+        }
+
         isGenerationCancelled.current = false;
         setIsGenerating(true);
         setUploadStatus(null);
@@ -316,13 +337,20 @@ const App: React.FC = () => {
 
                 setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando um título inovador...`);
                 setGenerationProgress(5);
-                const randomTopic = MATH_TOPICS[Math.floor(Math.random() * MATH_TOPICS.length)];
+                // Use getRandomTopic with selectedDiscipline
+                const randomTopic = getRandomTopic(selectedDiscipline);
                 temporaryTitle = await generatePaperTitle(randomTopic, language, analysisModel);
                 setGeneratedTitle(temporaryTitle);
 
                 setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando a primeira versão...`);
                 setGenerationProgress(15);
-                const { paper: initialPaper, sources } = await generateInitialPaper(temporaryTitle, language, pageCount, generationModel);
+                const { paper: initialPaper, sources } = await generateInitialPaper(
+                    temporaryTitle, 
+                    language, 
+                    pageCount, 
+                    generationModel, 
+                    { name: authorName, affiliation: authorAffiliation, orcid: authorOrcid } // Pass dynamic author details
+                );
                 currentPaper = initialPaper;
                 setPaperSources(sources);
 
@@ -369,7 +397,7 @@ const App: React.FC = () => {
                         formData.append('file', compiledFile, 'paper.pdf');
                         const uploadResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}/files`, { method: 'POST', headers: { 'Authorization': `Bearer ${storedToken}` }, body: formData });
                         if (!uploadResponse.ok) throw new Error('Falha no upload do PDF');
-                        const metadataPayload = { metadata: { title: metadataForUpload.title, upload_type: 'publication', publication_type: 'article', description: metadataForUpload.abstract, creators: metadataForUpload.authors.filter(a => a.name).map(a => ({ name: a.name, orcid: a.orcid || undefined })), keywords: keywordsForUpload.split(',').map(k => k.trim()).filter(k => k) } };
+                        const metadataPayload = { metadata: { title: metadataForUpload.title, upload_type: 'publication', publication_type: 'article', description: metadataForUpload.abstract, creators: [{ name: authorName, orcid: authorOrcid || undefined }], keywords: keywordsForUpload.split(',').map(k => k.trim()).filter(k => k) } };
                         const metadataResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}`, { method: 'PUT', headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(metadataPayload) });
                         if (!metadataResponse.ok) throw new Error('Falha ao atualizar metadados');
                         const publishResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}/actions/publish`, { method: 'POST', headers: { 'Authorization': `Bearer ${storedToken}` } });
@@ -465,6 +493,14 @@ const App: React.FC = () => {
             return;
         }
         setZenodoToken(storedToken);
+
+        // Check if author details are present
+        if (!authorName || !authorAffiliation || !authorOrcid) {
+            setUploadStatus(<div className="status-message status-error">❌ Dados pessoais do autor (Nome, Afiliação, ORCID) não encontrados! Por favor, configure-os no ícone de "pessoa".</div>);
+            setIsPersonalDataModalOpen(true);
+            setIsRepublishingId(null);
+            return;
+        }
     
         try {
             setUploadStatus(<div className="status-message status-info">⏳ Iniciando republicação para "{articleToRepublish.title}"...</div>);
@@ -512,7 +548,7 @@ const App: React.FC = () => {
                     formData.append('file', compiledFile, 'paper.pdf');
                     const uploadResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}/files`, {
                         method: 'POST',
-                        headers: { 'Authorization': `Bearer ${storedToken}` },
+                        headers: { 'Authorization': `Bearer ${storedToken}` }, // Content-Type is not needed with FormData
                         body: formData
                     });
                     if (!uploadResponse.ok) throw new Error('Falha no upload do PDF');
@@ -524,10 +560,7 @@ const App: React.FC = () => {
                             upload_type: 'publication',
                             publication_type: 'article',
                             description: metadataForUpload.abstract,
-                            creators: metadataForUpload.authors.filter(a => a.name).map(a => ({
-                                name: a.name,
-                                orcid: a.orcid || undefined
-                            })),
+                            creators: [{ name: authorName, orcid: authorOrcid || undefined }], // Use dynamic author details
                             keywords: keywordsArray.length > 0 ? keywordsArray : undefined
                         }
                     };
@@ -606,10 +639,11 @@ const App: React.FC = () => {
         const abstractMatch = code.match(/\\begin\{abstract\}([\s\S]*?)\\end\{abstract\}/);
         const abstractText = abstractMatch ? abstractMatch[1].trim().replace(/\\noindent\s*/g, '').replace(/\\/g, '') : '';
         
+        // Use dynamic author details for metadata extraction
         const authors: Author[] = [{
-            name: 'SÉRGIO DE ANDRADE, PAULO',
-            affiliation: '',
-            orcid: '0009-0004-2555-3178'
+            name: authorName,
+            affiliation: authorAffiliation,
+            orcid: authorOrcid
         }];
         
         const keywordsMatch = code.match(/\\keywords\{([^}]+)\}/) || code.match(/Palavras-chave:}\s*([^\n]+)/);
@@ -766,6 +800,13 @@ const App: React.FC = () => {
         setFilter(prev => ({ ...prev, [name]: value }));
     };
 
+    const handleSavePersonalData = (data: PersonalData) => {
+        setAuthorName(data.name);
+        setAuthorAffiliation(data.affiliation);
+        setAuthorOrcid(data.orcid);
+        setIsPersonalDataModalOpen(false);
+    };
+
     const sortedArticleEntries = articleEntries.slice().sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     
     const filteredArticleEntries = sortedArticleEntries.filter(article => {
@@ -785,15 +826,28 @@ const App: React.FC = () => {
     return (
         <div className="container">
             <ApiKeyModal isOpen={isApiModalOpen} onClose={() => setIsApiModalOpen(false)} onSave={(keys) => { if (keys.gemini) localStorage.setItem('gemini_api_key', keys.gemini); if (keys.zenodo) setZenodoToken(keys.zenodo); if (keys.xai) localStorage.setItem('xai_api_key', keys.xai); setIsApiModalOpen(false); }} />
+            <PersonalDataModal
+                isOpen={isPersonalDataModalOpen}
+                onClose={() => setIsPersonalDataModalOpen(false)}
+                onSave={handleSavePersonalData}
+                initialData={{ name: authorName, affiliation: authorAffiliation, orcid: authorOrcid }}
+            />
             <div className="main-header">
                 <div className="flex justify-between items-center">
                     <div>
                         <h1>🔬 Fluxo Integrado de Publicação Científica</h1>
                         <p>AI Paper Generator → LaTeX Compiler → Zenodo Uploader</p>
                     </div>
-                    <button onClick={() => setIsApiModalOpen(true)} className="p-2 rounded-full hover:bg-gray-200 transition-colors" title="API Key Settings">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                    </button>
+                    <div className="flex gap-2"> {/* Container for buttons */}
+                        <button onClick={() => setIsPersonalDataModalOpen(true)} className="p-2 rounded-full hover:bg-gray-200 transition-colors" title="Configurações de Dados Pessoais">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                            </svg>
+                        </button>
+                        <button onClick={() => setIsApiModalOpen(true)} className="p-2 rounded-full hover:bg-gray-200 transition-colors" title="Configurações de API Key">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -812,6 +866,22 @@ const App: React.FC = () => {
                                 <ModelSelector models={AVAILABLE_MODELS} selectedModel={analysisModel} onSelect={setAnalysisModel} label="Modelo Rápido (para análise e título):" />
                                 <ModelSelector models={AVAILABLE_MODELS} selectedModel={generationModel} onSelect={setGenerationModel} label="Modelo Poderoso (para geração e melhoria):" />
                                 <PageSelector options={[12, 30, 60, 100]} selectedPageCount={pageCount} onSelect={setPageCount} />
+                                <div>
+                                    <label htmlFor="discipline-select" className="font-semibold block mb-2">Disciplina para Geração de Título:</label>
+                                    <select
+                                        id="discipline-select"
+                                        value={selectedDiscipline}
+                                        onChange={(e) => setSelectedDiscipline(e.target.value)}
+                                        className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                                        disabled={isGenerating}
+                                    >
+                                        {getAllDisciplines().map((discipline) => (
+                                            <option key={discipline} value={discipline}>
+                                                {discipline}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
                                 <div>
                                     <label className="font-semibold block mb-2">Número de Artigos a Gerar (Manual):</label>
                                     <input type="number" min="1" max="100" value={numberOfArticles} onChange={(e) => setNumberOfArticles(Math.max(1, Number(e.target.value)))} className="w-full" disabled={isContinuousMode || isSchedulerEnabled} />
@@ -890,7 +960,18 @@ const App: React.FC = () => {
                  <div className="card">
                      <h2>🚀 Passo 3: Publicar no Zenodo</h2>
                      <div className="max-w-3xl mx-auto">
-                        <ZenodoUploader ref={uploaderRef} title={extractedMetadata.title} abstractText={extractedMetadata.abstract} keywords={extractedMetadata.keywords} authors={extractedMetadata.authors} compiledPdfFile={compiledPdfFile} onFileSelect={() => {}} onPublishStart={() => { setIsUploading(true); setUploadStatus(<div className="status-message status-info">⏳ Publicando...</div>); }} onPublishSuccess={(result) => { setUploadStatus(<div className="status-message status-success"><p>✅ Publicado com sucesso!</p><p><strong>DOI:</strong> {result.doi}</p><p><strong>Link:</strong> <a href={result.zenodoLink} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">{result.zenodoLink}</a></p></div>); setArticleEntries(prev => prev.map(entry => { if (entry.title === extractedMetadata.title && entry.status !== 'published') { return { ...entry, status: 'published', doi: result.doi, link: result.zenodoLink, date: new Date().toISOString(), latexCode: undefined, errorMessage: undefined, }; } return entry; })); }} onPublishError={(message) => setUploadStatus(<div className="status-message status-error">❌ {message}</div>)} extractedMetadata={extractedMetadata} />
+                        <ZenodoUploader 
+                            ref={uploaderRef} 
+                            title={extractedMetadata.title} 
+                            abstractText={extractedMetadata.abstract} 
+                            keywords={extractedMetadata.keywords} 
+                            authors={[{ name: authorName, affiliation: authorAffiliation, orcid: authorOrcid }]} // Pass dynamic author details
+                            compiledPdfFile={compiledPdfFile} 
+                            onFileSelect={() => {}} 
+                            onPublishStart={() => { setIsUploading(true); setUploadStatus(<div className="status-message status-info">⏳ Publicando...</div>); }} 
+                            onPublishSuccess={(result) => { setUploadStatus(<div className="status-message status-success"><p>✅ Publicado com sucesso!</p><p><strong>DOI:</strong> {result.doi}</p><p><strong>Link:</strong> <a href={result.zenodoLink} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">{result.zenodoLink}</a></p></div>); setArticleEntries(prev => prev.map(entry => { if (entry.title === extractedMetadata.title && entry.status !== 'published') { return { ...entry, status: 'published', doi: result.doi, link: result.zenodoLink, date: new Date().toISOString(), latexCode: undefined, errorMessage: undefined, }; } return entry; })); }} 
+                            onPublishError={(message) => setUploadStatus(<div className="status-message status-error">❌ {message}</div>)} 
+                            extractedMetadata={extractedMetadata} />
                          <div className="mt-6 text-center"><ActionButton onClick={() => uploaderRef.current?.submit()} disabled={isUploading} isLoading={isUploading} text="Publicar Agora" loadingText="Publicando..." /></div>
                         <div className="mt-4">{uploadStatus}</div>
                      </div>

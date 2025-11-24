@@ -174,7 +174,12 @@ function postProcessLatex(latexCode: string): string {
     return latexCode.replace(/,?\s+&\s+/g, ' and ');
 }
 
-// New function to fetch papers from Semantic Scholar
+/**
+ * Fetches papers from the Semantic Scholar API based on a query.
+ * @param query The search query string (e.g., paper title).
+ * @param limit The maximum number of papers to fetch.
+ * @returns A promise that resolves to an array of SemanticScholarPaper objects.
+ */
 async function fetchSemanticScholarPapers(query: string, limit: number = 5): Promise<SemanticScholarPaper[]> {
     try {
         const fields = 'paperId,title,authors,abstract,url'; // Requesting specific fields
@@ -186,6 +191,7 @@ async function fetchSemanticScholarPapers(query: string, limit: number = 5): Pro
         }
 
         const data = await response.json();
+        // Semantic Scholar API returns data.data for the list of papers
         return data.data || [];
     } catch (error) {
         console.error("Error fetching from Semantic Scholar:", error);
@@ -194,7 +200,7 @@ async function fetchSemanticScholarPapers(query: string, limit: number = 5): Pro
 }
 
 
-export async function generateInitialPaper(title: string, language: Language, pageCount: number, model: string): Promise<{ paper: string, sources: PaperSource[] }> {
+export async function generateInitialPaper(title: string, language: Language, pageCount: number, model: string, authorDetails: { name: string; affiliation: string; orcid: string }): Promise<{ paper: string, sources: PaperSource[] }> {
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
     const babelLanguage = BABEL_LANG_MAP[language];
 
@@ -233,14 +239,14 @@ export async function generateInitialPaper(title: string, language: Language, pa
 6.  **CRITICAL RULE - AVOID AMPERSAND:** To prevent compilation errors, you **MUST NOT** use the ampersand character ('&').
     -   In the bibliography/reference section, you MUST use the word 'and' to separate author names.
     -   **Example (Incorrect):** "Smith, J. & Doe, J."
-    -   **Example (Correct):** "Smith, J. and Doe, J."
+    -   **Example (Correct):** "Smith, J. and J. Doe."
 7.  **CRITICAL RULE - OTHER CHARACTERS:** You must also properly escape other special LaTeX characters like '%', '$', '#', '_', '{', '}'. For example, an underscore must be written as \`\\_\`.
 8.  **CRITICAL RULE - NO URLs:** References must **NOT** contain any URLs or web links. Format them as academic citations only, without any \`\\url{}\` commands.
 9.  **CRITICAL RULE - METADATA:** Do NOT place complex content inside the \`\\hypersetup{...}\` command. Only the title and author should be there.
 `;
 
     // Dynamically insert the babel package and reference placeholders into the template for the prompt
-    const templateWithBabel = ARTICLE_TEMPLATE.replace(
+    let templateWithBabelAndAuthor = ARTICLE_TEMPLATE.replace(
         '% Babel package will be added dynamically based on language',
         `\\usepackage[${babelLanguage}]{babel}`
     ).replace(
@@ -251,11 +257,26 @@ export async function generateInitialPaper(title: string, language: Language, pa
         referencePlaceholders
     );
 
+    // Replace dynamic author information
+    templateWithBabelAndAuthor = templateWithBabelAndAuthor.replace(
+        '[INSERT AUTHOR NAME]',
+        authorDetails.name
+    );
+    templateWithBabelAndAuthor = templateWithBabelAndAuthor.replace(
+        '[INSERT ORCID COMMAND]',
+        authorDetails.orcid ? `\\small ORCID: \\url{https://orcid.org/${authorDetails.orcid}}` : ''
+    );
+    templateWithBabelAndAuthor = templateWithBabelAndAuthor.replace(
+        'pdfauthor={[INSERT AUTHOR NAME]}',
+        `pdfauthor={${authorDetails.name}}`
+    );
+
+
     const userPrompt = `Using the following LaTeX template, generate a complete scientific paper with the title: "${title}".
 ${semanticScholarContext}
 **Template:**
 \`\`\`latex
-${templateWithBabel}
+${templateWithBabelAndAuthor}
 \`\`\`
 `;
 

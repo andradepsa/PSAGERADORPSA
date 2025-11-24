@@ -41,7 +41,9 @@ export interface PaperSource {
     title: string;
 }
 
-// New interface for Semantic Scholar API response
+/**
+ * Interface for the response structure of the Semantic Scholar API when searching for papers.
+ */
 export interface SemanticScholarPaper {
     paperId: string;
     title: string;
@@ -50,13 +52,18 @@ export interface SemanticScholarPaper {
     url: string; // URL to the paper on Semantic Scholar
 }
 
-// Fix: Add ZenodoAuthor and ExtractedMetadata types to resolve import errors in ZenodoUploader.tsx.
+/**
+ * Interface for author data, specifically for Zenodo submissions.
+ */
 export interface ZenodoAuthor {
     name: string;
     affiliation: string;
     orcid: string;
 }
 
+/**
+ * Interface for metadata extracted from a LaTeX paper.
+ */
 export interface ExtractedMetadata {
     title: string;
     abstract: string;
@@ -82,3 +89,9 @@ export type ArticleEntry = {
     latexCode?: string; // Full LaTeX code for pending articles
     errorMessage?: string; // Error message for failed attempts
 };
+
+export interface PersonalData {
+    name: string;
+    affiliation: string;
+    orcid: string;
+}
