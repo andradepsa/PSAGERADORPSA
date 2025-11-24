@@ -116,3 +116,5 @@ export const MATH_TOPICS: string[] = [
     'Criptografia e Teoria da Informação',
     'Otimização e Pesquisa Operacional'
 ];
+
+export const SEMANTIC_SCHOLAR_API_BASE_URL = 'https://api.semanticscholar.org/graph/v1/paper/search';

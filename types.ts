@@ -41,6 +41,15 @@ export interface PaperSource {
     title: string;
 }
 
+// New interface for Semantic Scholar API response
+export interface SemanticScholarPaper {
+    paperId: string;
+    title: string;
+    authors: { name: string }[];
+    abstract?: string; // Abstract can be optional
+    url: string; // URL to the paper on Semantic Scholar
+}
+
 // Fix: Add ZenodoAuthor and ExtractedMetadata types to resolve import errors in ZenodoUploader.tsx.
 export interface ZenodoAuthor {
     name: string;

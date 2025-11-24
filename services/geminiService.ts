@@ -1,10 +1,6 @@
-
-
-
-
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
-import type { Language, AnalysisResult, PaperSource, StyleGuide } from '../types';
-import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES } from '../constants';
+import type { Language, AnalysisResult, PaperSource, StyleGuide, SemanticScholarPaper } from '../types';
+import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES, SEMANTIC_SCHOLAR_API_BASE_URL } from '../constants';
 import { ARTICLE_TEMPLATE } from './articleTemplate'; // Import the single article template
 
 const BABEL_LANG_MAP: Record<Language, string> = {
@@ -178,6 +174,25 @@ function postProcessLatex(latexCode: string): string {
     return latexCode.replace(/,?\s+&\s+/g, ' and ');
 }
 
+// New function to fetch papers from Semantic Scholar
+async function fetchSemanticScholarPapers(query: string, limit: number = 5): Promise<SemanticScholarPaper[]> {
+    try {
+        const fields = 'paperId,title,authors,abstract,url'; // Requesting specific fields
+        const response = await fetch(`${SEMANTIC_SCHOLAR_API_BASE_URL}?query=${encodeURIComponent(query)}&limit=${limit}&fields=${fields}`);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Semantic Scholar API error: ${response.status} - ${errorText}`);
+        }
+
+        const data = await response.json();
+        return data.data || [];
+    } catch (error) {
+        console.error("Error fetching from Semantic Scholar:", error);
+        return [];
+    }
+}
+
 
 export async function generateInitialPaper(title: string, language: Language, pageCount: number, model: string): Promise<{ paper: string, sources: PaperSource[] }> {
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
@@ -193,6 +208,15 @@ export async function generateInitialPaper(title: string, language: Language, pa
         (_, i) => `[INSERT REFERENCE ${i + 1} HERE]`
     ).join('\n\n');
 
+    // Fetch Semantic Scholar papers
+    const semanticScholarPapers = await fetchSemanticScholarPapers(title, 5); // Fetch top 5 relevant papers
+    const semanticScholarContext = semanticScholarPapers.length > 0
+        ? "\n\n**Additional Academic Sources from Semantic Scholar (prioritize these for high-quality references):**\n" +
+          semanticScholarPapers.map(p => 
+              `- Title: ${p.title}\n  Authors: ${p.authors.map(a => a.name).join(', ')}\n  Abstract: ${p.abstract || 'N/A'}\n  URL: ${p.url}`
+          ).join('\n---\n')
+        : "";
+
     const systemInstruction = `You are a world-class AI assistant specialized in generating high-quality, well-structured scientific papers in LaTeX format. Your task is to write a complete, coherent, and academically rigorous paper based on a provided title, strictly following a given LaTeX template.
 
 **Execution Rules:**
@@ -202,7 +226,7 @@ export async function generateInitialPaper(title: string, language: Language, pa
     -   \`[INSERT NEW COMPLETE ABSTRACT HERE]\`: Write a new abstract for the paper in the \`\\begin{abstract}\` environment. The abstract text itself must not contain any LaTeX commands.
     -   \`[INSERT COMMA-SEPARATED KEYWORDS HERE]\`: Provide new keywords relevant to the title.
     -   \`[INSERT NEW CONTENT FOR ... SECTION HERE]\`: Write substantial, high-quality academic content for each section (Introduction, Literature Review, etc.) to generate a paper of approximately **${pageCount} pages**.
-    -   \`[INSERT REFERENCE 1 HERE]\` through \`[INSERT REFERENCE ${referenceCount} HERE]\`: For each of these placeholders, generate a single, unique academic reference relevant to the title. Use Google Search grounding for this. Each generated reference must be a plain paragraph, for example, starting with \`\\noindent\` and ending with \`\\par\`. Do NOT use \`\\bibitem\` or \`thebibliography\`.
+    -   \`[INSERT REFERENCE 1 HERE]\` through \`[INSERT REFERENCE ${referenceCount} HERE]\`: For each of these placeholders, generate a single, unique academic reference relevant to the title. **Use Google Search grounding and the provided "Additional Academic Sources from Semantic Scholar" for this. Prioritize the quality and academic rigor of the Semantic Scholar sources first for references.** Each generated reference must be a plain paragraph, for example, starting with \`\\noindent\` and ending with \`\\par\`. Do NOT use \`\\bibitem\` or \`thebibliography\`.
 3.  **Strictly Adhere to Structure:** Do NOT modify the LaTeX structure provided in the template. Do not add or remove packages, change the author information, or alter the section commands. The only exception is adding the correct babel package for the language.
 4.  **Language:** The entire paper must be written in **${languageName}**.
 5.  **Output Format:** The entire output MUST be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) around the LaTeX code.
@@ -228,7 +252,7 @@ export async function generateInitialPaper(title: string, language: Language, pa
     );
 
     const userPrompt = `Using the following LaTeX template, generate a complete scientific paper with the title: "${title}".
-
+${semanticScholarContext}
 **Template:**
 \`\`\`latex
 ${templateWithBabel}
