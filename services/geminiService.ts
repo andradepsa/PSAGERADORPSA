@@ -233,7 +233,7 @@ export async function generateInitialPaper(title: string, language: Language, pa
     -   \`[INSERT COMMA-SEPARATED KEYWORDS HERE]\`: Provide new keywords relevant to the title.
     -   \`[INSERT NEW CONTENT FOR ... SECTION HERE]\`: Write substantial, high-quality academic content for each section (Introduction, Literature Review, etc.) to generate a paper of approximately **${pageCount} pages**.
     -   \`[INSERT REFERENCE 1 HERE]\` through \`[INSERT REFERENCE ${referenceCount} HERE]\`: For each of these placeholders, generate a single, unique academic reference relevant to the title. **Use Google Search grounding and the provided "Additional Academic Sources from Semantic Scholar" for this. Prioritize the quality and academic rigor of the Semantic Scholar sources first for references.** Each generated reference must be a plain paragraph, for example, starting with \`\\noindent\` and ending with \`\\par\`. Do NOT use \`\\bibitem\` or \`thebibliography\`.
-3.  **Strictly Adhere to Structure:** Do NOT modify the LaTeX structure provided in the template. Do not add or remove packages, change the author information, or alter the section commands. The only exception is adding the correct babel package for the language.
+3.  **Strictly Adhere to Structure:** Do NOT modify the LaTeX structure provided in the template. Do not add or remove packages, or alter the section commands. **CRITICAL: The \\author{} and \\date{} commands in the template, which already contain the author information, MUST NOT be changed or overwritten. Use them exactly as provided.** The only exception is adding the correct babel package for the language.
 4.  **Language:** The entire paper must be written in **${languageName}**.
 5.  **Output Format:** The entire output MUST be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) around the LaTeX code.
 6.  **CRITICAL RULE - AVOID AMPERSAND:** To prevent compilation errors, you **MUST NOT** use the ampersand character ('&').
@@ -382,6 +382,7 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     const improvementPoints = analysis.analysis
         .filter(item => item.score < 8.5)
         .map(item => {
+            // FIX: Corrected property access from 'item.num' to 'item.topicNum'
             const topic = ANALYSIS_TOPICS.find(t => t.num === item.topicNum);
             const topicName = topic ? topic.name : `UNKNOWN TOPIC (${item.topicNum})`;
             return `- **${topicName} (Score: ${item.score})**: ${item.improvement}`;

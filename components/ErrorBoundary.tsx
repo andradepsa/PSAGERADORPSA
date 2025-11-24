@@ -1,6 +1,5 @@
-// FIX: Switched to a standard import style for React to resolve type errors where 'setState' and 'props' were not correctly inferred on the component instance.
-import * as React from 'react'; // Changed to import * as React to ensure correct type inference for 'this'
-import { ErrorInfo, ReactNode } from 'react'; // Keep other named imports
+// FIX: Changed import style to correctly infer 'setState' and 'props' on the component instance.
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 
 interface ErrorBoundaryProps {
   children?: ReactNode;
@@ -13,7 +12,7 @@ interface ErrorBoundaryState {
 }
 
 // FIX: Extend React.Component after changing import style
-class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   public state: ErrorBoundaryState = {
     hasError: false,
     error: null,
