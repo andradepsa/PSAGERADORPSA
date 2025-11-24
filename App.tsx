@@ -807,6 +807,14 @@ const App: React.FC = () => {
         setIsPersonalDataModalOpen(false);
     };
 
+    const handleClearArticleEntries = () => {
+        if (window.confirm("Tem certeza de que deseja limpar todo o histórico de publicações? Esta ação é irreversível.")) {
+            setArticleEntries([]);
+            localStorage.removeItem('article_entries_log');
+            alert("Histórico de publicações limpo com sucesso!");
+        }
+    };
+
     const sortedArticleEntries = articleEntries.slice().sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     
     const filteredArticleEntries = sortedArticleEntries.filter(article => {
@@ -981,13 +989,22 @@ const App: React.FC = () => {
             {step === 4 && (
                 <div className="card">
                     <h2>📚 Passo 4: Artigos Publicados</h2>
-                    <div className="mb-6 p-4 bg-gray-50 rounded-lg border">
-                        <h3 className="font-semibold mb-2">Filtrar por Data de Publicação/Tentativa</h3>
-                        <div className="flex flex-wrap items-center gap-4">
+                    <div className="mb-6 p-4 bg-gray-50 rounded-lg border flex flex-col sm:flex-row justify-between items-center gap-4">
+                        <div className="flex flex-col sm:flex-row flex-wrap items-center gap-4">
+                            <h3 className="font-semibold mb-2 sm:mb-0">Filtrar por Data:</h3>
                             <input type="text" name="day" value={filter.day} onChange={handleFilterChange} placeholder="Dia (ex: 5)" className="w-24"/>
                             <input type="text" name="month" value={filter.month} onChange={handleFilterChange} placeholder="Mês (ex: 8)" className="w-24"/>
                             <input type="text" name="year" value={filter.year} onChange={handleFilterChange} placeholder="Ano (ex: 2024)" className="w-32"/>
                         </div>
+                        <button 
+                            onClick={handleClearArticleEntries} 
+                            className="px-4 py-2 text-sm font-semibold text-white bg-red-600 rounded-md hover:bg-red-700 transition-colors flex items-center gap-1"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm6 0a1 1 0 11-2 0v6a1 1 0 112 0V8z" clipRule="evenodd" />
+                            </svg>
+                            Limpar Histórico
+                        </button>
                     </div>
                     <div className="overflow-x-auto">
                          <table className="min-w-full bg-white border border-gray-200">
