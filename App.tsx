@@ -95,9 +95,27 @@ const App: React.FC = () => {
     const [keywordsInput, setKeywordsInput] = useState('');
     
     // State for author personal data, loaded from localStorage
-    const [authorName, setAuthorName] = useState(() => localStorage.getItem('author_name') || 'SÉRGIO DE ANDRADE, PAULO');
-    const [authorAffiliation, setAuthorAffiliation] = useState(() => localStorage.getItem('author_affiliation') || 'Faculdade de Guarulhos (FG)');
-    const [authorOrcid, setAuthorOrcid] = useState(() => localStorage.getItem('author_orcid') || '0009-0004-2555-3178');
+    const [authors, setAuthors] = useState<PersonalData[]>(() => {
+        try {
+            const stored = localStorage.getItem('all_authors_data');
+            const parsed = stored ? JSON.parse(stored) : [];
+            if (parsed.length === 0) {
+                // Default to a single author if no data found
+                return [{ 
+                    name: 'SÉRGIO DE ANDRADE, PAULO', 
+                    affiliation: 'Faculdade de Guarulhos (FG)', 
+                    orcid: '0009-0004-2555-3178' 
+                }];
+            }
+            return parsed;
+        } catch {
+            return [{ 
+                name: 'SÉRGIO DE ANDRADE, PAULO', 
+                affiliation: 'Faculdade de Guarulhos (FG)', 
+                orcid: '0009-0004-2555-3178' 
+            }];
+        }
+    });
 
     // == AUTOMATION & SCHEDULER STATE ==
     const [isContinuousMode, setIsContinuousMode] = useState(() => {
@@ -129,12 +147,14 @@ const App: React.FC = () => {
         }
     }, [zenodoToken]);
 
-    // Effect to save author personal data to localStorage
+    // Effect to save all author personal data to localStorage
     useEffect(() => {
-        localStorage.setItem('author_name', authorName);
-        localStorage.setItem('author_affiliation', authorAffiliation);
-        localStorage.setItem('author_orcid', authorOrcid);
-    }, [authorName, authorAffiliation, authorOrcid]);
+        try {
+            localStorage.setItem('all_authors_data', JSON.stringify(authors));
+        } catch (error) {
+            console.error("Failed to save author data to localStorage", error);
+        }
+    }, [authors]);
 
     // Effect to save all article entries to localStorage
     useEffect(() => {
@@ -309,8 +329,9 @@ const App: React.FC = () => {
         setZenodoToken(storedToken);
 
         // Check if author details are present
-        if (!authorName || !authorAffiliation || !authorOrcid) {
-            alert('❌ Dados pessoais do autor (Nome, Afiliação, ORCID) não encontrados! Por favor, configure-os no ícone de "pessoa" antes de iniciar.');
+        const hasValidAuthor = authors.some(author => author.name && author.affiliation && author.orcid);
+        if (authors.length === 0 || !hasValidAuthor) {
+            alert('❌ Dados pessoais do autor (Nome, Afiliação, ORCID) não encontrados ou incompletos! Por favor, configure-os no ícone de "pessoa" antes de iniciar.');
             setIsPersonalDataModalOpen(true);
             return;
         }
@@ -349,7 +370,7 @@ const App: React.FC = () => {
                     language, 
                     pageCount, 
                     generationModel, 
-                    { name: authorName, affiliation: authorAffiliation, orcid: authorOrcid } // Pass dynamic author details
+                    authors // Pass dynamic authors array
                 );
                 currentPaper = initialPaper;
                 setPaperSources(sources);
@@ -397,7 +418,13 @@ const App: React.FC = () => {
                         formData.append('file', compiledFile, 'paper.pdf');
                         const uploadResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}/files`, { method: 'POST', headers: { 'Authorization': `Bearer ${storedToken}` }, body: formData });
                         if (!uploadResponse.ok) throw new Error('Falha no upload do PDF');
-                        const metadataPayload = { metadata: { title: metadataForUpload.title, upload_type: 'publication', publication_type: 'article', description: metadataForUpload.abstract, creators: [{ name: authorName, orcid: authorOrcid || undefined }], keywords: keywordsForUpload.split(',').map(k => k.trim()).filter(k => k) } };
+                        
+                        const creators = authors.filter(a => a.name).map(author => ({
+                            name: author.name,
+                            orcid: author.orcid || undefined // Affiliation intentionally omitted for Zenodo
+                        }));
+
+                        const metadataPayload = { metadata: { title: metadataForUpload.title, upload_type: 'publication', publication_type: 'article', description: metadataForUpload.abstract, creators: creators, keywords: keywordsForUpload.split(',').map(k => k.trim()).filter(k => k) } };
                         const metadataResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}`, { method: 'PUT', headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(metadataPayload) });
                         if (!metadataResponse.ok) throw new Error('Falha ao atualizar metadados');
                         const publishResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}/actions/publish`, { method: 'POST', headers: { 'Authorization': `Bearer ${storedToken}` } });
@@ -495,8 +522,9 @@ const App: React.FC = () => {
         setZenodoToken(storedToken);
 
         // Check if author details are present
-        if (!authorName || !authorAffiliation || !authorOrcid) {
-            setUploadStatus(<div className="status-message status-error">❌ Dados pessoais do autor (Nome, Afiliação, ORCID) não encontrados! Por favor, configure-os no ícone de "pessoa".</div>);
+        const hasValidAuthor = authors.some(author => author.name && author.affiliation && author.orcid);
+        if (authors.length === 0 || !hasValidAuthor) {
+            setUploadStatus(<div className="status-message status-error">❌ Dados pessoais do autor (Nome, Afiliação, ORCID) não encontrados ou incompletos! Por favor, configure-os no ícone de "pessoa".</div>);
             setIsPersonalDataModalOpen(true);
             setIsRepublishingId(null);
             return;
@@ -554,13 +582,18 @@ const App: React.FC = () => {
                     if (!uploadResponse.ok) throw new Error('Falha no upload do PDF');
     
                     const keywordsArray = keywordsForUpload.split(',').map(k => k.trim()).filter(k => k);
+                    const creators = authors.filter(a => a.name).map(author => ({
+                        name: author.name,
+                        orcid: author.orcid || undefined // Affiliation intentionally omitted for Zenodo
+                    }));
+
                     const metadataPayload = {
                         metadata: {
                             title: metadataForUpload.title,
                             upload_type: 'publication',
                             publication_type: 'article',
                             description: metadataForUpload.abstract,
-                            creators: [{ name: authorName, orcid: authorOrcid || undefined }], // Use dynamic author details
+                            creators: creators, // Use dynamic author details
                             keywords: keywordsArray.length > 0 ? keywordsArray : undefined
                         }
                     };
@@ -640,16 +673,17 @@ const App: React.FC = () => {
         const abstractText = abstractMatch ? abstractMatch[1].trim().replace(/\\noindent\s*/g, '').replace(/\\/g, '') : '';
         
         // Use dynamic author details for metadata extraction
-        const authors: Author[] = [{
-            name: authorName,
-            affiliation: authorAffiliation,
-            orcid: authorOrcid
-        }];
+        // The `authors` state already holds the necessary ZenodoAuthor[] structure
+        const currentAuthors: Author[] = authors.map(a => ({
+            name: a.name,
+            affiliation: a.affiliation,
+            orcid: a.orcid
+        }));
         
         const keywordsMatch = code.match(/\\keywords\{([^}]+)\}/) || code.match(/Palavras-chave:}\s*([^\n]+)/);
         const keywords = keywordsMatch ? keywordsMatch[1] : '';
 
-        const metadata = { title, abstract: abstractText, authors, keywords };
+        const metadata = { title, abstract: abstractText, authors: currentAuthors, keywords };
 
         if (returnData) {
             return metadata;
@@ -800,10 +834,8 @@ const App: React.FC = () => {
         setFilter(prev => ({ ...prev, [name]: value }));
     };
 
-    const handleSavePersonalData = (data: PersonalData) => {
-        setAuthorName(data.name);
-        setAuthorAffiliation(data.affiliation);
-        setAuthorOrcid(data.orcid);
+    const handleSavePersonalData = (data: PersonalData[]) => {
+        setAuthors(data);
         setIsPersonalDataModalOpen(false);
     };
 
@@ -838,7 +870,7 @@ const App: React.FC = () => {
                 isOpen={isPersonalDataModalOpen}
                 onClose={() => setIsPersonalDataModalOpen(false)}
                 onSave={handleSavePersonalData}
-                initialData={{ name: authorName, affiliation: authorAffiliation, orcid: authorOrcid }}
+                initialData={authors} // Pass the entire authors array
             />
             <div className="main-header">
                 <div className="flex justify-between items-center">
@@ -973,7 +1005,7 @@ const App: React.FC = () => {
                             title={extractedMetadata.title} 
                             abstractText={extractedMetadata.abstract} 
                             keywords={extractedMetadata.keywords} 
-                            authors={[{ name: authorName, affiliation: authorAffiliation, orcid: authorOrcid }]} // Pass dynamic author details
+                            authors={authors} // Pass the entire authors array
                             compiledPdfFile={compiledPdfFile} 
                             onFileSelect={() => {}} 
                             onPublishStart={() => { setIsUploading(true); setUploadStatus(<div className="status-message status-info">⏳ Publicando...</div>); }} 
