@@ -148,20 +148,28 @@ async function callModel(
 }
 
 
-export async function generatePaperTitle(topic: string, language: Language, model: string): Promise<string> {
+export async function generatePaperTitle(topic: string, language: Language, model: string, discipline: string): Promise<string> {
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
 
-    const systemInstruction = `You are an expert mathematician and academic researcher. Your task is to generate a single, compelling, and high-impact title for a scientific paper.`;
+    // Updated system instruction to be dynamic based on the discipline
+    const systemInstruction = `You are an expert academic researcher in the field of ${discipline}. Your task is to generate a single, compelling, and high-impact title for a scientific paper.`;
     
-    const userPrompt = `Based on the broad mathematical topic of "${topic}", generate a single, novel, and specific title for a high-impact research paper. 
+    // Updated user prompt to remove hardcoded "mathematical" bias
+    const userPrompt = `Based on the topic "${topic}" within the discipline of ${discipline}, generate a single, novel, and specific title for a high-impact research paper. 
     
     **Requirements:**
-    - The title must sound like a genuine, modern academic publication.
+    - The title must sound like a genuine, modern academic publication in ${discipline}.
     - It must be concise and impactful.
     - It must be written in **${languageName}**.
     - Your entire response MUST be only the title itself. Do not include quotation marks, labels like "Title:", or any other explanatory text.`;
 
     const response = await callModel(model, systemInstruction, userPrompt);
+    
+    // Safety check for empty response
+    if (!response.text) {
+        throw new Error("AI returned an empty response for the title generation.");
+    }
+    
     return response.text.trim().replace(/"/g, ''); // Clean up any accidental quotes
 }
 
@@ -288,6 +296,11 @@ ${templateWithBabelAndAuthor}
 
     const response = await callModel(model, systemInstruction, userPrompt, { googleSearch: true });
     
+    // Safety check
+    if (!response.text) {
+        throw new Error("AI returned an empty response for the paper generation.");
+    }
+
     let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
     
     // Ensure the paper ends with \end{document}
@@ -372,6 +385,11 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
         responseSchema: responseSchema
     });
     
+    // Safety check
+    if (!response.text) {
+        throw new Error("AI returned an empty response for the analysis.");
+    }
+
     try {
         const jsonText = response.text.trim().replace(/^```json\s*|```\s*$/g, '');
         const result = JSON.parse(jsonText);
@@ -416,6 +434,12 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     const userPrompt = `Current Paper Content:\n\n${paperContent}\n\nImprovement Points:\n\n${improvementPoints}\n\nBased on the above improvement points, provide the complete, improved LaTeX source code for the paper.`;
 
     const response = await callModel(model, systemInstruction, userPrompt);
+    
+    // Safety check
+    if (!response.text) {
+        throw new Error("AI returned an empty response for the improvement step.");
+    }
+
     let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
 
     // Ensure the paper ends with \end{document}
@@ -457,6 +481,12 @@ ${paperContent}
 `;
 
     const response = await callModel(model, systemInstruction, userPrompt);
+    
+    // Safety check
+    if (!response.text) {
+        throw new Error("AI returned an empty response for the fix step.");
+    }
+    
     let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
     
     // Ensure the paper ends with \end{document}
@@ -495,6 +525,12 @@ export async function reformatPaperWithStyleGuide(paperContent: string, styleGui
     `;
 
     const response = await callModel(model, systemInstruction, userPrompt);
+    
+    // Safety check
+    if (!response.text) {
+        throw new Error("AI returned an empty response for the reformat step.");
+    }
+
     let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
 
     // Ensure the paper ends with \end{document}

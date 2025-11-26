@@ -356,11 +356,12 @@ const App: React.FC = () => {
                 setGeneratedTitle('');
                 setFinalLatexCode('');
 
-                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando um título inovador...`);
+                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando um título inovador para ${selectedDiscipline}...`);
                 setGenerationProgress(5);
                 // Use getRandomTopic with selectedDiscipline
                 const randomTopic = getRandomTopic(selectedDiscipline);
-                temporaryTitle = await generatePaperTitle(randomTopic, language, analysisModel);
+                // Pass selectedDiscipline to the title generator
+                temporaryTitle = await generatePaperTitle(randomTopic, language, analysisModel, selectedDiscipline);
                 setGeneratedTitle(temporaryTitle);
 
                 setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando a primeira versão...`);
