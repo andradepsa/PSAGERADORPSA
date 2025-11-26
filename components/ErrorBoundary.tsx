@@ -1,5 +1,4 @@
-// FIX: Changed import style to correctly infer 'setState' and 'props' on the component instance.
-import React, { ErrorInfo, ReactNode } from 'react'; // FIX: Removed 'Component' from destructured import, will use React.Component
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 
 interface ErrorBoundaryProps {
   children?: ReactNode;
@@ -11,8 +10,7 @@ interface ErrorBoundaryState {
   errorInfo: ErrorInfo | null;
 }
 
-// FIX: Extend React.Component after changing import style
-class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> { // FIX: Changed 'Component' to 'React.Component'
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   public state: ErrorBoundaryState = {
     hasError: false,
     error: null,

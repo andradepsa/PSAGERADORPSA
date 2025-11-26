@@ -13,14 +13,92 @@ const BABEL_LANG_MAP: Record<Language, string> = {
 const MAX_RETRIES = 5;
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Creates a new Gemini client instance, reading the API key from localStorage
-// with a fallback to process.env for environments where it's set.
-function getAiClient(): GoogleGenAI {
-    const apiKey = localStorage.getItem('gemini_api_key') || (process.env.API_KEY as string);
-    if (!apiKey) {
-        throw new Error("Gemini API key not found. Please set it in the settings modal (gear icon).");
+// --- Key Management Logic ---
+let currentKeyIndex = 0;
+
+function getAllGeminiKeys(): string[] {
+    const storedList = localStorage.getItem('gemini_api_keys_list');
+    if (storedList) {
+        try {
+            const parsed = JSON.parse(storedList);
+            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        } catch {
+            // ignore parse error
+        }
     }
-    return new GoogleGenAI({ apiKey });
+    
+    // Fallback to single legacy key or env var
+    const singleKey = localStorage.getItem('gemini_api_key') || (process.env.API_KEY as string);
+    return singleKey ? [singleKey] : [];
+}
+
+function rotateKey(totalKeys: number) {
+    currentKeyIndex = (currentKeyIndex + 1) % totalKeys;
+    console.log(`[Key Manager] Rotating to key index: ${currentKeyIndex}`);
+}
+
+// Get the specific key for the current index
+function getActiveKey(): string {
+    const keys = getAllGeminiKeys();
+    if (keys.length === 0) {
+        throw new Error("No Gemini API keys found. Please set them in the settings modal.");
+    }
+    // Ensure index is within bounds (e.g. if keys were removed)
+    if (currentKeyIndex >= keys.length) {
+        currentKeyIndex = 0;
+    }
+    return keys[currentKeyIndex];
+}
+
+// Instantiate client with the *current* active key
+function getAiClient(): GoogleGenAI {
+    return new GoogleGenAI({ apiKey: getActiveKey() });
+}
+
+// Wrapper to handle API calls with rotation logic
+async function withKeyRotation<T>(apiCallFactory: () => Promise<T>): Promise<T> {
+    const keys = getAllGeminiKeys();
+    // We attempt to use the current key. If it fails due to quota, we rotate.
+    // We try at most keys.length times to ensure we don't loop forever if ALL keys are dead.
+    // However, for each key, we might do standard retries (network glitches).
+    
+    // Total attempts across all keys could be keys.length. 
+    // Ideally, if a key fails with Quota, we move to next immediately.
+    
+    let attemptsAcrossKeys = 0;
+    const totalKeys = keys.length;
+
+    while (attemptsAcrossKeys < totalKeys) {
+        try {
+            return await withRateLimitHandling(apiCallFactory);
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
+            
+            // Check for Quota/Rate Limit specifically
+            const isQuotaError = errorMessage.includes('429') || 
+                                 errorMessage.includes('quota') || 
+                                 errorMessage.includes('limit: 0');
+            
+            if (isQuotaError) {
+                console.warn(`[Key Manager] Key index ${currentKeyIndex} exhausted (Error: ${errorMessage}). Rotating...`);
+                attemptsAcrossKeys++;
+                
+                // If we have tried all keys, we must stop.
+                if (attemptsAcrossKeys >= totalKeys) {
+                    throw new Error("All configured API keys have exceeded their quota or are invalid.");
+                }
+
+                rotateKey(totalKeys);
+                // Continue loop -> creates new client with new key in next iteration
+                continue; 
+            }
+            
+            // If it's another error (like 500, network, or content filter), throw it up.
+            // Note: withRateLimitHandling already retries for transient errors (503), so if it throws here, it's real.
+            throw error; 
+        }
+    }
+    throw new Error("Unexpected end of key rotation loop.");
 }
 
 async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
@@ -32,32 +110,28 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
             const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
             
             // Check for hard failure (Quota limit: 0)
-            // This specifically handles the case where the user tries to use a model (like gemini-3)
-            // that isn't enabled or has 0 quota on their plan.
             if (errorMessage.includes('limit: 0') || errorMessage.includes('quota exceeded for metric')) {
-                 throw new Error("API Quota Exceeded (Limit: 0). This model appears to be unavailable for your API key/Tier. Please select a different model (e.g., Gemini 2.5 Pro) in the settings.");
+                 // Throw immediately so the Rotation wrapper handles it
+                 throw error;
+            }
+            
+            // Standard Rate Limit (429) also typically means we should rotate if possible, 
+            // but sometimes it's just "slow down".
+            // However, for robust automation with multiple keys, treating 429 as "rotate" is safer/faster.
+            if (errorMessage.includes('429')) {
+                throw error; // Throw so rotation wrapper catches it
             }
 
             if (attempt === MAX_RETRIES) {
-                 if (errorMessage.includes('429') || errorMessage.includes('quota')) {
-                    throw new Error("You exceeded your current quota. Please wait a minute before trying again. For higher limits, check your plan and billing details.");
-                 }
                  if (errorMessage.includes('503') || errorMessage.includes('overloaded')) {
                     throw new Error("The AI model is temporarily overloaded. Please try again in a few moments.");
                  }
-                throw new Error("Failed to call the API after multiple attempts. Please check your connection and try again later.");
+                throw new Error(`Failed to call the API after multiple attempts. Error: ${errorMessage}`);
             }
 
-            let backoffTime;
-            
-            if (errorMessage.includes('429') || errorMessage.includes('quota')) {
-                console.log("Rate limit exceeded. Waiting for 61 seconds before retrying...");
-                backoffTime = 61000 + Math.random() * 1000;
-            } else {
-                console.log("Transient error detected. Using exponential backoff...");
-                backoffTime = Math.pow(2, attempt) * 1000 + Math.random() * 250;
-            }
-            
+            // Standard backoff for transient errors (network, 503, etc)
+            console.log("Transient error detected. Using exponential backoff...");
+            const backoffTime = Math.pow(2, attempt) * 1000 + Math.random() * 250;
             console.log(`Waiting for ${backoffTime.toFixed(0)}ms before retrying...`);
             await delay(backoffTime);
         }
@@ -78,18 +152,24 @@ async function callModel(
     } = {}
 ): Promise<GenerateContentResponse> {
     if (model.startsWith('gemini-')) {
-        const ai = getAiClient();
-        const apiCall = () => ai.models.generateContent({
-            model: model,
-            contents: userPrompt,
-            config: {
-                systemInstruction: systemInstruction,
-                ...(config.jsonOutput && { responseMimeType: "application/json" }),
-                ...(config.responseSchema && { responseSchema: config.responseSchema }),
-                ...(config.googleSearch && { tools: [{ googleSearch: {} }] }),
-            },
-        });
-        return withRateLimitHandling(apiCall);
+        // We wrap the specific API call logic in a factory function
+        // so `withKeyRotation` can re-execute it with a fresh client (new key).
+        const apiCallFactory = async () => {
+            const ai = getAiClient(); // Gets client with *current* active key
+            return ai.models.generateContent({
+                model: model,
+                contents: userPrompt,
+                config: {
+                    systemInstruction: systemInstruction,
+                    ...(config.jsonOutput && { responseMimeType: "application/json" }),
+                    ...(config.responseSchema && { responseSchema: config.responseSchema }),
+                    ...(config.googleSearch && { tools: [{ googleSearch: {} }] }),
+                },
+            });
+        };
+        
+        return withKeyRotation(apiCallFactory);
+
     } else if (model.startsWith('grok-')) {
         const apiKey = localStorage.getItem('xai_api_key');
         if (!apiKey) {

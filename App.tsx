@@ -453,9 +453,9 @@ const App: React.FC = () => {
                 console.error(`Error processing article ${i}:`, error);
 
                 // Critical Error Handling: Stop automation on quota errors.
-                if (errorMessage.toLowerCase().includes('quota')) {
-                    setGenerationStatus(`🛑 Limite de cota da API atingido. A automação será pausada e reiniciada no próximo horário agendado.`);
-                    setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: 'upload_failed', latexCode: currentPaper, errorMessage: `Pausado por limite de cota: ${errorMessage}` }]);
+                if (errorMessage.toLowerCase().includes('quota') || errorMessage.toLowerCase().includes('limit: 0') || errorMessage.toLowerCase().includes('all keys exhausted')) {
+                    setGenerationStatus(`🛑 Automação interrompida: ${errorMessage}.`);
+                    setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: 'upload_failed', latexCode: currentPaper, errorMessage: `Falha Crítica de Cota: ${errorMessage}` }]);
                     isGenerationCancelled.current = true; // Use this flag to signal a hard stop
                     break; // Exit the loop immediately.
                 }
@@ -481,10 +481,10 @@ const App: React.FC = () => {
         if (isGenerationCancelled.current) {
             // Check if the stop was due to quota or manual cancellation
             setGenerationStatus(prevStatus => {
-                if (prevStatus.includes('Limite de cota')) {
-                    return prevStatus; // Keep the quota message
+                if (prevStatus.includes('Falha Crítica de Cota') || prevStatus.includes('All keys exhausted')) {
+                    return prevStatus; 
                 }
-                return "❌ Automação cancelada pelo usuário."; // Default manual cancellation message
+                return "❌ Automação cancelada pelo usuário."; 
             });
         } else if (isContinuousMode) {
             setGenerationStatus(`✅ Lote de ${articlesToProcess} artigos concluído. Iniciando próximo lote...`);
@@ -866,7 +866,20 @@ const App: React.FC = () => {
     
     return (
         <div className="container">
-            <ApiKeyModal isOpen={isApiModalOpen} onClose={() => setIsApiModalOpen(false)} onSave={(keys) => { if (keys.gemini) localStorage.setItem('gemini_api_key', keys.gemini); if (keys.zenodo) setZenodoToken(keys.zenodo); if (keys.xai) localStorage.setItem('xai_api_key', keys.xai); setIsApiModalOpen(false); }} />
+            <ApiKeyModal 
+                isOpen={isApiModalOpen} 
+                onClose={() => setIsApiModalOpen(false)} 
+                onSave={(keys) => { 
+                    if (keys.gemini && keys.gemini.length > 0) {
+                        localStorage.setItem('gemini_api_keys_list', JSON.stringify(keys.gemini));
+                        // Clean up legacy key to avoid confusion
+                        localStorage.removeItem('gemini_api_key');
+                    }
+                    if (keys.zenodo) setZenodoToken(keys.zenodo); 
+                    if (keys.xai) localStorage.setItem('xai_api_key', keys.xai); 
+                    setIsApiModalOpen(false); 
+                }} 
+            />
             <PersonalDataModal
                 isOpen={isPersonalDataModalOpen}
                 onClose={() => setIsPersonalDataModalOpen(false)}
