@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide } from './services/geminiService';
+import { generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide, subscribeToKeyChanges } from './services/geminiService';
 import type { Language, IterationAnalysis, PaperSource, AnalysisResult, StyleGuide, ArticleEntry, PersonalData } from './types';
 import { LANGUAGES, AVAILABLE_MODELS, ANALYSIS_TOPICS, ALL_TOPICS_BY_DISCIPLINE, getAllDisciplines, getRandomTopic, FIX_OPTIONS, STYLE_GUIDES, TOTAL_ITERATIONS } from './constants';
 
@@ -41,6 +41,7 @@ const App: React.FC = () => {
     const [step, setStep] = useState(1);
     const [isApiModalOpen, setIsApiModalOpen] = useState(false);
     const [isPersonalDataModalOpen, setIsPersonalDataModalOpen] = useState(false); // New state for personal data modal
+    const [currentKeyName, setCurrentKeyName] = useState<string>(''); // State for current key name
 
     // == STEP 1: GENERATION STATE ==
     const [language, setLanguage] = useState<Language>('en');
@@ -136,6 +137,14 @@ const App: React.FC = () => {
         if (typeof pdfjsLib !== 'undefined') {
             pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         }
+    }, []);
+
+    // Effect for API Key Subscription
+    useEffect(() => {
+        const unsubscribe = subscribeToKeyChanges((name) => {
+            setCurrentKeyName(name);
+        });
+        return () => unsubscribe();
     }, []);
     
     // Update zenodoToken in localStorage whenever it changes
@@ -887,11 +896,26 @@ const App: React.FC = () => {
                 initialData={authors} // Pass the entire authors array
             />
             <div className="main-header">
-                <div className="flex justify-between items-center">
+                <div className="flex flex-col md:flex-row justify-between items-center gap-4">
                     <div>
                         <h1>🔬 Fluxo Integrado de Publicação Científica</h1>
                         <p>AI Paper Generator → LaTeX Compiler → Zenodo Uploader</p>
                     </div>
+                    
+                    {/* API Key Status Indicator */}
+                    {currentKeyName && (
+                        <div className="hidden md:flex items-center gap-2 px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-full">
+                            <span className="text-xs font-bold text-indigo-800 uppercase tracking-wide">API Ativa:</span>
+                            <span className="text-sm font-medium text-indigo-600 flex items-center gap-1">
+                                <span className="relative flex h-2 w-2">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                                </span>
+                                {currentKeyName}
+                            </span>
+                        </div>
+                    )}
+
                     <div className="flex gap-2"> {/* Container for buttons */}
                         <button onClick={() => setIsPersonalDataModalOpen(true)} className="p-2 rounded-full hover:bg-gray-200 transition-colors" title="Configurações de Dados Pessoais">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -903,6 +927,21 @@ const App: React.FC = () => {
                         </button>
                     </div>
                 </div>
+                 {/* Mobile API Key Status */}
+                 {currentKeyName && (
+                    <div className="md:hidden mt-4 flex justify-center">
+                         <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 border border-indigo-200 rounded-full">
+                            <span className="text-[10px] font-bold text-indigo-800 uppercase tracking-wide">API Ativa:</span>
+                            <span className="text-xs font-medium text-indigo-600 flex items-center gap-1">
+                                <span className="relative flex h-2 w-2">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                                </span>
+                                {currentKeyName}
+                            </span>
+                        </div>
+                    </div>
+                )}
             </div>
 
             <div className="workflow-steps">

@@ -1,33 +1,48 @@
 import React, { useState, useEffect } from 'react';
+import type { ApiKeyDef } from '../types';
 
 interface ApiKeyModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onSave: (keys: { gemini: string[], zenodo: string, xai: string }) => void;
+    onSave: (keys: { gemini: ApiKeyDef[], zenodo: string, xai: string }) => void;
 }
 
 const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave }) => {
-    const [geminiKeys, setGeminiKeys] = useState<string[]>([]);
+    const [geminiKeys, setGeminiKeys] = useState<ApiKeyDef[]>([]);
     const [zenodoKey, setZenodoKey] = useState('');
     const [xaiKey, setXaiKey] = useState('');
-    const [newGeminiKeyInput, setNewGeminiKeyInput] = useState('');
+    
+    // Form state
+    const [newKeyName, setNewKeyName] = useState('');
+    const [newKeyValue, setNewKeyValue] = useState('');
 
     useEffect(() => {
         if (isOpen) {
             // Load list of keys
-            const storedKeys = localStorage.getItem('gemini_api_keys_list');
-            if (storedKeys) {
+            const storedList = localStorage.getItem('gemini_api_keys_list');
+            let keys: ApiKeyDef[] = [];
+            
+            if (storedList) {
                 try {
-                    setGeminiKeys(JSON.parse(storedKeys));
+                    const parsed = JSON.parse(storedList);
+                    if (Array.isArray(parsed)) {
+                        // Compatibility with old string[] format
+                        if (parsed.length > 0 && typeof parsed[0] === 'string') {
+                            keys = parsed.map((k, i) => ({ key: k, name: `Chave Antiga ${i + 1}` }));
+                        } else {
+                            keys = parsed as ApiKeyDef[];
+                        }
+                    }
                 } catch {
-                    setGeminiKeys([]);
+                    keys = [];
                 }
             } else {
                 // Fallback for legacy single key
                 const legacyKey = localStorage.getItem('gemini_api_key');
-                if (legacyKey) setGeminiKeys([legacyKey]);
+                if (legacyKey) keys = [{ key: legacyKey, name: 'Minha Chave Padrão' }];
             }
-
+            
+            setGeminiKeys(keys);
             setZenodoKey(localStorage.getItem('zenodo_api_key') || '');
             setXaiKey(localStorage.getItem('xai_api_key') || '');
         }
@@ -36,12 +51,14 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave }) =>
     if (!isOpen) return null;
 
     const handleAddKey = () => {
-        if (newGeminiKeyInput.trim()) {
-            // Avoid duplicates
-            if (!geminiKeys.includes(newGeminiKeyInput.trim())) {
-                setGeminiKeys([...geminiKeys, newGeminiKeyInput.trim()]);
+        if (newKeyValue.trim()) {
+            // Check for duplicates based on the KEY value
+            if (!geminiKeys.some(k => k.key === newKeyValue.trim())) {
+                const name = newKeyName.trim() || `API Key ${geminiKeys.length + 1}`;
+                setGeminiKeys([...geminiKeys, { key: newKeyValue.trim(), name }]);
             }
-            setNewGeminiKeyInput('');
+            setNewKeyValue('');
+            setNewKeyName('');
         }
     };
 
@@ -52,8 +69,9 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave }) =>
     const handleSave = () => {
         // If the user typed a key but didn't click add, add it automatically
         let finalKeys = [...geminiKeys];
-        if (newGeminiKeyInput.trim() && !geminiKeys.includes(newGeminiKeyInput.trim())) {
-            finalKeys.push(newGeminiKeyInput.trim());
+        if (newKeyValue.trim() && !geminiKeys.some(k => k.key === newKeyValue.trim())) {
+             const name = newKeyName.trim() || `API Key ${geminiKeys.length + 1}`;
+            finalKeys.push({ key: newKeyValue.trim(), name });
         }
         
         onSave({ gemini: finalKeys, zenodo: zenodoKey, xai: xaiKey });
@@ -70,7 +88,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave }) =>
                 </div>
                 
                 <p className="text-gray-600 mb-6 text-sm">
-                    Gerencie suas chaves de API. Para o Gemini, você pode adicionar <strong>várias chaves</strong>. O sistema usará uma por vez e trocará automaticamente para a próxima se a cota acabar.
+                    Gerencie suas chaves de API. Nomeie suas chaves para identificar qual está sendo usada durante a rotação automática.
                 </p>
                 
                 <div className="space-y-6">
@@ -82,12 +100,14 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave }) =>
                         
                         {/* List of existing keys */}
                         <div className="space-y-2 mb-3 max-h-40 overflow-y-auto">
-                            {geminiKeys.map((key, index) => (
+                            {geminiKeys.map((item, index) => (
                                 <div key={index} className="flex items-center gap-2 bg-white p-2 rounded border border-gray-200">
-                                    <span className="flex-grow font-mono text-xs text-gray-600 truncate">
-                                        {key.substring(0, 8)}...{key.substring(key.length - 6)}
-                                    </span>
-                                    <span className="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded">Ativa</span>
+                                    <div className="flex-grow flex flex-col">
+                                        <span className="font-bold text-sm text-gray-800">{item.name}</span>
+                                        <span className="font-mono text-xs text-gray-500 truncate">
+                                            {item.key.substring(0, 8)}...{item.key.substring(item.key.length - 6)}
+                                        </span>
+                                    </div>
                                     <button 
                                         onClick={() => handleRemoveKey(index)}
                                         className="text-red-500 hover:text-red-700 p-1"
@@ -105,24 +125,33 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave }) =>
                         </div>
 
                         {/* Input for new key */}
-                        <div className="flex gap-2">
+                        <div className="grid grid-cols-1 gap-2">
                             <input
-                                type="password"
-                                value={newGeminiKeyInput}
-                                onChange={(e) => setNewGeminiKeyInput(e.target.value)}
-                                placeholder="Colar nova API Key aqui..."
-                                className="flex-grow p-2 text-sm border border-gray-300 rounded focus:ring-indigo-500 focus:border-indigo-500"
+                                type="text"
+                                value={newKeyName}
+                                onChange={(e) => setNewKeyName(e.target.value)}
+                                placeholder="Nome/Apelido (ex: Pessoal, Trabalho)"
+                                className="p-2 text-sm border border-gray-300 rounded focus:ring-indigo-500 focus:border-indigo-500"
                             />
-                            <button
-                                onClick={handleAddKey}
-                                disabled={!newGeminiKeyInput.trim()}
-                                className="bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700 disabled:bg-gray-400 text-sm font-semibold"
-                            >
-                                Adicionar
-                            </button>
+                            <div className="flex gap-2">
+                                <input
+                                    type="password"
+                                    value={newKeyValue}
+                                    onChange={(e) => setNewKeyValue(e.target.value)}
+                                    placeholder="Colar API Key aqui..."
+                                    className="flex-grow p-2 text-sm border border-gray-300 rounded focus:ring-indigo-500 focus:border-indigo-500"
+                                />
+                                <button
+                                    onClick={handleAddKey}
+                                    disabled={!newKeyValue.trim()}
+                                    className="bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700 disabled:bg-gray-400 text-sm font-semibold"
+                                >
+                                    Adicionar
+                                </button>
+                            </div>
                         </div>
                         <p className="text-xs text-indigo-800 mt-2">
-                            Dica: Adicione quantas chaves quiser. Se a chave 1 falhar por limite de cota, o sistema pulará imediatamente para a chave 2.
+                            Dica: Se uma chave atingir o limite de cota, o sistema pulará automaticamente para a próxima chave da lista.
                         </p>
                     </div>
 

@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
-import type { Language, AnalysisResult, PaperSource, StyleGuide, SemanticScholarPaper, PersonalData } from '../types';
+import type { Language, AnalysisResult, PaperSource, StyleGuide, SemanticScholarPaper, PersonalData, ApiKeyDef } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES, SEMANTIC_SCHOLAR_API_BASE_URL } from '../constants';
 import { ARTICLE_TEMPLATE } from './articleTemplate'; // Import the single article template
 
@@ -15,26 +15,44 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // --- Key Management Logic ---
 let currentKeyIndex = 0;
+const keyChangeListeners: Set<(keyName: string) => void> = new Set();
 
-function getAllGeminiKeys(): string[] {
+// Helper to normalize storage data
+function getAllGeminiKeys(): ApiKeyDef[] {
     const storedList = localStorage.getItem('gemini_api_keys_list');
+    let keys: ApiKeyDef[] = [];
+
     if (storedList) {
         try {
             const parsed = JSON.parse(storedList);
-            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+            if (Array.isArray(parsed)) {
+                // Check if it's an array of strings (legacy) or objects (new)
+                if (parsed.length > 0 && typeof parsed[0] === 'string') {
+                    keys = parsed.map((k, i) => ({ key: k, name: `Chave Antiga ${i + 1}` }));
+                } else {
+                    keys = parsed as ApiKeyDef[];
+                }
+            }
         } catch {
             // ignore parse error
         }
     }
     
-    // Fallback to single legacy key or env var
-    const singleKey = localStorage.getItem('gemini_api_key') || (process.env.API_KEY as string);
-    return singleKey ? [singleKey] : [];
+    // Fallback to single legacy key or env var if list is empty
+    if (keys.length === 0) {
+        const singleKey = localStorage.getItem('gemini_api_key') || (process.env.API_KEY as string);
+        if (singleKey) {
+            keys.push({ key: singleKey, name: 'Chave Padrão' });
+        }
+    }
+
+    return keys;
 }
 
 function rotateKey(totalKeys: number) {
     currentKeyIndex = (currentKeyIndex + 1) % totalKeys;
     console.log(`[Key Manager] Rotating to key index: ${currentKeyIndex}`);
+    notifyKeyChange();
 }
 
 // Get the specific key for the current index
@@ -47,7 +65,29 @@ function getActiveKey(): string {
     if (currentKeyIndex >= keys.length) {
         currentKeyIndex = 0;
     }
-    return keys[currentKeyIndex];
+    return keys[currentKeyIndex].key;
+}
+
+export function getActiveKeyName(): string {
+    const keys = getAllGeminiKeys();
+    if (keys.length === 0) return 'Nenhuma Chave';
+    if (currentKeyIndex >= keys.length) currentKeyIndex = 0;
+    return keys[currentKeyIndex].name;
+}
+
+// Subscription for UI updates
+export function subscribeToKeyChanges(callback: (keyName: string) => void) {
+    keyChangeListeners.add(callback);
+    // Immediately invoke with current state
+    callback(getActiveKeyName());
+    return () => {
+        keyChangeListeners.delete(callback);
+    };
+}
+
+function notifyKeyChange() {
+    const name = getActiveKeyName();
+    keyChangeListeners.forEach(callback => callback(name));
 }
 
 // Instantiate client with the *current* active key
