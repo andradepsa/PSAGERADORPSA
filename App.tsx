@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide } from './services/geminiService';
+import { generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide, subscribeToKeyChanges } from './services/geminiService';
 import type { Language, IterationAnalysis, PaperSource, AnalysisResult, StyleGuide, ArticleEntry, PersonalData } from './types';
 import { LANGUAGES, AVAILABLE_MODELS, ANALYSIS_TOPICS, ALL_TOPICS_BY_DISCIPLINE, getAllDisciplines, getRandomTopic, FIX_OPTIONS, STYLE_GUIDES, TOTAL_ITERATIONS } from './constants';
 
@@ -41,6 +41,7 @@ const App: React.FC = () => {
     const [step, setStep] = useState(1);
     const [isApiModalOpen, setIsApiModalOpen] = useState(false);
     const [isPersonalDataModalOpen, setIsPersonalDataModalOpen] = useState(false); // New state for personal data modal
+    const [currentKeyName, setCurrentKeyName] = useState<string>(''); // State for current key name
 
     // == STEP 1: GENERATION STATE ==
     const [language, setLanguage] = useState<Language>('en');
@@ -136,6 +137,14 @@ const App: React.FC = () => {
         if (typeof pdfjsLib !== 'undefined') {
             pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         }
+    }, []);
+
+    // Effect for API Key Subscription
+    useEffect(() => {
+        const unsubscribe = subscribeToKeyChanges((name) => {
+            setCurrentKeyName(name);
+        });
+        return () => unsubscribe();
     }, []);
     
     // Update zenodoToken in localStorage whenever it changes
@@ -453,9 +462,9 @@ const App: React.FC = () => {
                 console.error(`Error processing article ${i}:`, error);
 
                 // Critical Error Handling: Stop automation on quota errors.
-                if (errorMessage.toLowerCase().includes('quota')) {
-                    setGenerationStatus(`🛑 Limite de cota da API atingido. A automação será pausada e reiniciada no próximo horário agendado.`);
-                    setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: 'upload_failed', latexCode: currentPaper, errorMessage: `Pausado por limite de cota: ${errorMessage}` }]);
+                if (errorMessage.toLowerCase().includes('quota') || errorMessage.toLowerCase().includes('limit: 0') || errorMessage.toLowerCase().includes('all keys exhausted')) {
+                    setGenerationStatus(`🛑 Automação interrompida: ${errorMessage}.`);
+                    setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: 'upload_failed', latexCode: currentPaper, errorMessage: `Falha Crítica de Cota: ${errorMessage}` }]);
                     isGenerationCancelled.current = true; // Use this flag to signal a hard stop
                     break; // Exit the loop immediately.
                 }
@@ -481,10 +490,10 @@ const App: React.FC = () => {
         if (isGenerationCancelled.current) {
             // Check if the stop was due to quota or manual cancellation
             setGenerationStatus(prevStatus => {
-                if (prevStatus.includes('Limite de cota')) {
-                    return prevStatus; // Keep the quota message
+                if (prevStatus.includes('Falha Crítica de Cota') || prevStatus.includes('All keys exhausted')) {
+                    return prevStatus; 
                 }
-                return "❌ Automação cancelada pelo usuário."; // Default manual cancellation message
+                return "❌ Automação cancelada pelo usuário."; 
             });
         } else if (isContinuousMode) {
             setGenerationStatus(`✅ Lote de ${articlesToProcess} artigos concluído. Iniciando próximo lote...`);
@@ -866,7 +875,20 @@ const App: React.FC = () => {
     
     return (
         <div className="container">
-            <ApiKeyModal isOpen={isApiModalOpen} onClose={() => setIsApiModalOpen(false)} onSave={(keys) => { if (keys.gemini) localStorage.setItem('gemini_api_key', keys.gemini); if (keys.zenodo) setZenodoToken(keys.zenodo); if (keys.xai) localStorage.setItem('xai_api_key', keys.xai); setIsApiModalOpen(false); }} />
+            <ApiKeyModal 
+                isOpen={isApiModalOpen} 
+                onClose={() => setIsApiModalOpen(false)} 
+                onSave={(keys) => { 
+                    if (keys.gemini && keys.gemini.length > 0) {
+                        localStorage.setItem('gemini_api_keys_list', JSON.stringify(keys.gemini));
+                        // Clean up legacy key to avoid confusion
+                        localStorage.removeItem('gemini_api_key');
+                    }
+                    if (keys.zenodo) setZenodoToken(keys.zenodo); 
+                    if (keys.xai) localStorage.setItem('xai_api_key', keys.xai); 
+                    setIsApiModalOpen(false); 
+                }} 
+            />
             <PersonalDataModal
                 isOpen={isPersonalDataModalOpen}
                 onClose={() => setIsPersonalDataModalOpen(false)}
@@ -874,11 +896,26 @@ const App: React.FC = () => {
                 initialData={authors} // Pass the entire authors array
             />
             <div className="main-header">
-                <div className="flex justify-between items-center">
+                <div className="flex flex-col md:flex-row justify-between items-center gap-4">
                     <div>
                         <h1>🔬 Fluxo Integrado de Publicação Científica</h1>
                         <p>AI Paper Generator → LaTeX Compiler → Zenodo Uploader</p>
                     </div>
+                    
+                    {/* API Key Status Indicator */}
+                    {currentKeyName && (
+                        <div className="hidden md:flex items-center gap-2 px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-full">
+                            <span className="text-xs font-bold text-indigo-800 uppercase tracking-wide">API Ativa:</span>
+                            <span className="text-sm font-medium text-indigo-600 flex items-center gap-1">
+                                <span className="relative flex h-2 w-2">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                                </span>
+                                {currentKeyName}
+                            </span>
+                        </div>
+                    )}
+
                     <div className="flex gap-2"> {/* Container for buttons */}
                         <button onClick={() => setIsPersonalDataModalOpen(true)} className="p-2 rounded-full hover:bg-gray-200 transition-colors" title="Configurações de Dados Pessoais">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -890,6 +927,21 @@ const App: React.FC = () => {
                         </button>
                     </div>
                 </div>
+                 {/* Mobile API Key Status */}
+                 {currentKeyName && (
+                    <div className="md:hidden mt-4 flex justify-center">
+                         <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 border border-indigo-200 rounded-full">
+                            <span className="text-[10px] font-bold text-indigo-800 uppercase tracking-wide">API Ativa:</span>
+                            <span className="text-xs font-medium text-indigo-600 flex items-center gap-1">
+                                <span className="relative flex h-2 w-2">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                                </span>
+                                {currentKeyName}
+                            </span>
+                        </div>
+                    </div>
+                )}
             </div>
 
             <div className="workflow-steps">
