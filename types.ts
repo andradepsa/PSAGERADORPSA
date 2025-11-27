@@ -95,8 +95,3 @@ export interface PersonalData {
     affiliation: string;
     orcid: string;
 }
-
-export interface ApiKeyDef {
-    key: string;
-    name: string;
-}
