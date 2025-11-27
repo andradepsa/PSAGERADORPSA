@@ -238,6 +238,7 @@ const App: React.FC = () => {
 
 
     const getScoreClass = (score: number) => {
+        if (score >= 9.5) return 'bg-blue-600'; // MESTRE DOS GÊNIOS
         if (score >= 8.5) return 'bg-green-500';
         if (score >= 7.0) return 'bg-yellow-500';
         return 'bg-red-500';
