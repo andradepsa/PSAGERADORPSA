@@ -103,17 +103,17 @@ const App: React.FC = () => {
             if (parsed.length === 0) {
                 // Default to a single author if no data found
                 return [{ 
-                    name: 'Revista, Zen', 
-                    affiliation: 'Scientific Journal', 
-                    orcid: '0009-0007-6299-2008' 
+                    name: 'SÉRGIO DE ANDRADE, PAULO', 
+                    affiliation: 'Faculdade de Guarulhos (FG)', 
+                    orcid: '0009-0004-2555-3178' 
                 }];
             }
             return parsed;
         } catch {
             return [{ 
-                name: 'Revista, Zen', 
-                affiliation: 'Scientific Journal', 
-                orcid: '0009-0007-6299-2008' 
+                name: 'SÉRGIO DE ANDRADE, PAULO', 
+                affiliation: 'Faculdade de Guarulhos (FG)', 
+                orcid: '0009-0004-2555-3178' 
             }];
         }
     });
@@ -155,39 +155,6 @@ const App: React.FC = () => {
             localStorage.removeItem('zenodo_api_key');
         }
     }, [zenodoToken]);
-
-    // Effect to automatically update authors based on selected discipline
-    useEffect(() => {
-        const disciplineAuthorMap: Record<string, string> = {
-            "Mathematics": "MATH, 10",
-            "History of Humanity": "HISTORY, 10",
-            "Geography": "GEOGRAPHY, 10",
-            "Biology": "BIOLOGY, 10",
-            "Chemistry": "CHEMISTRY, 10",
-            "Physics": "PHYSICS, 10",
-            "Astronomy & Astrophysics": "ASTRO, 10",
-            "Philosophy": "PHILOSOPHY, 10",
-            "Literature": "LITERATURE, 10"
-        };
-
-        const author2Name = disciplineAuthorMap[selectedDiscipline] || "RESEARCHER, 10";
-        const commonOrcid = "0009-0007-6299-2008";
-
-        const newAuthors: PersonalData[] = [
-            { 
-                name: 'Revista, Zen', 
-                affiliation: 'Scientific Journal', 
-                orcid: commonOrcid 
-            },
-            { 
-                name: author2Name, 
-                affiliation: `Department of ${selectedDiscipline}`, 
-                orcid: commonOrcid 
-            }
-        ];
-        
-        setAuthors(newAuthors);
-    }, [selectedDiscipline]);
 
     // Effect to save all author personal data to localStorage
     useEffect(() => {
@@ -493,27 +460,11 @@ const App: React.FC = () => {
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : `Ocorreu um erro desconhecido no artigo ${i}.`;
                 console.error(`Error processing article ${i}:`, error);
-                
-                const lowerError = errorMessage.toLowerCase();
-                const isQuotaError = lowerError.includes('quota') || lowerError.includes('limit: 0') || lowerError.includes('all keys exhausted');
-                const isInvalidKeyError = lowerError.includes('api key not valid') || lowerError.includes('api_key_invalid');
 
-                // Critical Error Handling: Stop automation on quota errors or Invalid Keys.
-                if (isQuotaError || isInvalidKeyError) {
-                    let displayMsg = `Falha Crítica de Cota: ${errorMessage}`;
-                    if (isInvalidKeyError) {
-                         displayMsg = "🛑 Erro Crítico: A API Key do Gemini é inválida. Verifique as configurações (ícone engrenagem).";
-                    }
-
-                    setGenerationStatus(`🛑 Automação interrompida: ${displayMsg}`);
-                    setArticleEntries(prev => [...prev, { 
-                        id: articleEntryId, 
-                        title: temporaryTitle, 
-                        date: new Date().toISOString(), 
-                        status: 'upload_failed', 
-                        latexCode: currentPaper, 
-                        errorMessage: displayMsg 
-                    }]);
+                // Critical Error Handling: Stop automation on quota errors.
+                if (errorMessage.toLowerCase().includes('quota') || errorMessage.toLowerCase().includes('limit: 0') || errorMessage.toLowerCase().includes('all keys exhausted')) {
+                    setGenerationStatus(`🛑 Automação interrompida: ${errorMessage}.`);
+                    setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: 'upload_failed', latexCode: currentPaper, errorMessage: `Falha Crítica de Cota: ${errorMessage}` }]);
                     isGenerationCancelled.current = true; // Use this flag to signal a hard stop
                     break; // Exit the loop immediately.
                 }
@@ -539,7 +490,7 @@ const App: React.FC = () => {
         if (isGenerationCancelled.current) {
             // Check if the stop was due to quota or manual cancellation
             setGenerationStatus(prevStatus => {
-                if (prevStatus.includes('Falha Crítica de Cota') || prevStatus.includes('All keys exhausted') || prevStatus.includes('API Key do Gemini é inválida')) {
+                if (prevStatus.includes('Falha Crítica de Cota') || prevStatus.includes('All keys exhausted')) {
                     return prevStatus; 
                 }
                 return "❌ Automação cancelada pelo usuário."; 
