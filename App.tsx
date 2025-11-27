@@ -493,11 +493,27 @@ const App: React.FC = () => {
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : `Ocorreu um erro desconhecido no artigo ${i}.`;
                 console.error(`Error processing article ${i}:`, error);
+                
+                const lowerError = errorMessage.toLowerCase();
+                const isQuotaError = lowerError.includes('quota') || lowerError.includes('limit: 0') || lowerError.includes('all keys exhausted');
+                const isInvalidKeyError = lowerError.includes('api key not valid') || lowerError.includes('api_key_invalid');
 
-                // Critical Error Handling: Stop automation on quota errors.
-                if (errorMessage.toLowerCase().includes('quota') || errorMessage.toLowerCase().includes('limit: 0') || errorMessage.toLowerCase().includes('all keys exhausted')) {
-                    setGenerationStatus(`🛑 Automação interrompida: ${errorMessage}.`);
-                    setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: 'upload_failed', latexCode: currentPaper, errorMessage: `Falha Crítica de Cota: ${errorMessage}` }]);
+                // Critical Error Handling: Stop automation on quota errors or Invalid Keys.
+                if (isQuotaError || isInvalidKeyError) {
+                    let displayMsg = `Falha Crítica de Cota: ${errorMessage}`;
+                    if (isInvalidKeyError) {
+                         displayMsg = "🛑 Erro Crítico: A API Key do Gemini é inválida. Verifique as configurações (ícone engrenagem).";
+                    }
+
+                    setGenerationStatus(`🛑 Automação interrompida: ${displayMsg}`);
+                    setArticleEntries(prev => [...prev, { 
+                        id: articleEntryId, 
+                        title: temporaryTitle, 
+                        date: new Date().toISOString(), 
+                        status: 'upload_failed', 
+                        latexCode: currentPaper, 
+                        errorMessage: displayMsg 
+                    }]);
                     isGenerationCancelled.current = true; // Use this flag to signal a hard stop
                     break; // Exit the loop immediately.
                 }
@@ -523,7 +539,7 @@ const App: React.FC = () => {
         if (isGenerationCancelled.current) {
             // Check if the stop was due to quota or manual cancellation
             setGenerationStatus(prevStatus => {
-                if (prevStatus.includes('Falha Crítica de Cota') || prevStatus.includes('All keys exhausted')) {
+                if (prevStatus.includes('Falha Crítica de Cota') || prevStatus.includes('All keys exhausted') || prevStatus.includes('API Key do Gemini é inválida')) {
                     return prevStatus; 
                 }
                 return "❌ Automação cancelada pelo usuário."; 
