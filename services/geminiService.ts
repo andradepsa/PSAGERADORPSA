@@ -282,6 +282,7 @@ function postProcessLatex(latexCode: string): string {
 
 /**
  * Fetches papers from the Semantic Scholar API based on a query.
+ * PROXIED to avoid CORS issues in the browser.
  * @param query The search query string (e.g., paper title).
  * @param limit The maximum number of papers to fetch.
  * @returns A promise that resolves to an array of SemanticScholarPaper objects.
@@ -289,11 +290,13 @@ function postProcessLatex(latexCode: string): string {
 async function fetchSemanticScholarPapers(query: string, limit: number = 5): Promise<SemanticScholarPaper[]> {
     try {
         const fields = 'paperId,title,authors,abstract,url'; // Requesting specific fields
-        const response = await fetch(`${SEMANTIC_SCHOLAR_API_BASE_URL}?query=${encodeURIComponent(query)}&limit=${limit}&fields=${fields}`);
+        
+        // Use the local proxy instead of direct call
+        const response = await fetch(`/semantic-proxy?query=${encodeURIComponent(query)}&limit=${limit}&fields=${fields}`);
 
         if (!response.ok) {
             const errorText = await response.text();
-            throw new Error(`Semantic Scholar API error: ${response.status} - ${errorText}`);
+            throw new Error(`Semantic Scholar API error (via Proxy): ${response.status} - ${errorText}`);
         }
 
         const data = await response.json();
@@ -394,9 +397,16 @@ ${templateWithBabelAndAuthor}
 
     const response = await callModel(model, systemInstruction, userPrompt, { googleSearch: true });
     
-    // Safety check
+    // Detailed error reporting for empty responses
+    if (!response.candidates || response.candidates.length === 0) {
+        throw new Error("AI returned no candidates. This usually means the model refused the prompt (safety/policy).");
+    }
+    
     if (!response.text) {
-        throw new Error("AI returned an empty response for the paper generation.");
+        const candidate = response.candidates[0];
+        const reason = candidate.finishReason || 'UNKNOWN';
+        const safetyRatings = candidate.safetyRatings?.map(r => `${r.category}: ${r.probability}`).join(', ') || 'None';
+        throw new Error(`AI returned an empty text response. Finish Reason: ${reason}. Safety Ratings: [${safetyRatings}].`);
     }
 
     let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');

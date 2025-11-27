@@ -36,7 +36,6 @@ type PublishedArticle = {
 
 // Main App Component
 const App: React.FC = () => {
-    console.log('App component rendering...'); // Diagnostic log
     // Overall workflow step
     const [step, setStep] = useState(1);
     const [isApiModalOpen, setIsApiModalOpen] = useState(false);
@@ -425,17 +424,24 @@ const App: React.FC = () => {
                 const metadataForUpload = extractMetadata(currentPaper, true);
                 const keywordsForUpload = currentPaper.match(/\\keywords\{([^}]+)\}/)?.[1] || '';
                 let publishedResult: PublishedArticle | null = null;
+                
+                // Helper to wrap URL with proxy for Zenodo calls in automation loop
+                const proxied = (url: string) => `/zenodo-proxy?target=${encodeURIComponent(url)}`;
 
                 for (let attempt = 1; attempt <= 10; attempt++) {
                     if (isGenerationCancelled.current) break;
                     try {
                         const baseUrl = useSandbox ? 'https://sandbox.zenodo.org/api' : 'https://zenodo.org/api';
-                        const createResponse = await fetch(`${baseUrl}/deposit/depositions`, { method: 'POST', headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+                        // Use proxy for creation
+                        const createResponse = await fetch(proxied(`${baseUrl}/deposit/depositions`), { method: 'POST', headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
                         if (!createResponse.ok) throw new Error(`Erro ${createResponse.status} ao criar depósito.`);
                         const deposit = await createResponse.json();
+                        
                         const formData = new FormData();
                         formData.append('file', compiledFile, 'paper.pdf');
-                        const uploadResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}/files`, { method: 'POST', headers: { 'Authorization': `Bearer ${storedToken}` }, body: formData });
+                        
+                        // Use proxy for file upload
+                        const uploadResponse = await fetch(proxied(`${baseUrl}/deposit/depositions/${deposit.id}/files`), { method: 'POST', headers: { 'Authorization': `Bearer ${storedToken}` }, body: formData });
                         if (!uploadResponse.ok) throw new Error('Falha no upload do PDF');
                         
                         const creators = authors.filter(a => a.name).map(author => ({
@@ -444,9 +450,11 @@ const App: React.FC = () => {
                         }));
 
                         const metadataPayload = { metadata: { title: metadataForUpload.title, upload_type: 'publication', publication_type: 'article', description: metadataForUpload.abstract, creators: creators, keywords: keywordsForUpload.split(',').map(k => k.trim()).filter(k => k) } };
-                        const metadataResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}`, { method: 'PUT', headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(metadataPayload) });
+                        // Use proxy for metadata update
+                        const metadataResponse = await fetch(proxied(`${baseUrl}/deposit/depositions/${deposit.id}`), { method: 'PUT', headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(metadataPayload) });
                         if (!metadataResponse.ok) throw new Error('Falha ao atualizar metadados');
-                        const publishResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}/actions/publish`, { method: 'POST', headers: { 'Authorization': `Bearer ${storedToken}` } });
+                        // Use proxy for publish
+                        const publishResponse = await fetch(proxied(`${baseUrl}/deposit/depositions/${deposit.id}/actions/publish`), { method: 'POST', headers: { 'Authorization': `Bearer ${storedToken}` } });
                         if (!publishResponse.ok) throw new Error('Falha ao publicar');
                         const published = await publishResponse.json();
                         publishedResult = { doi: published.doi, link: useSandbox ? `https://sandbox.zenodo.org/records/${deposit.id}` : `https://zenodo.org/records/${deposit.id}`, title: metadataForUpload.title, date: new Date().toISOString() };
@@ -550,6 +558,9 @@ const App: React.FC = () => {
             setIsRepublishingId(null);
             return;
         }
+        
+        // Helper to wrap URL with proxy for republishing
+        const proxied = (url: string) => `/zenodo-proxy?target=${encodeURIComponent(url)}`;
     
         try {
             setUploadStatus(<div className="status-message status-info">⏳ Iniciando republicação para "{articleToRepublish.title}"...</div>);
@@ -585,7 +596,7 @@ const App: React.FC = () => {
                 try {
                     const baseUrl = useSandbox ? 'https://sandbox.zenodo.org/api' : 'https://zenodo.org/api';
                     
-                    const createResponse = await fetch(`${baseUrl}/deposit/depositions`, {
+                    const createResponse = await fetch(proxied(`${baseUrl}/deposit/depositions`), {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' },
                         body: JSON.stringify({})
@@ -595,7 +606,7 @@ const App: React.FC = () => {
     
                     const formData = new FormData();
                     formData.append('file', compiledFile, 'paper.pdf');
-                    const uploadResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}/files`, {
+                    const uploadResponse = await fetch(proxied(`${baseUrl}/deposit/depositions/${deposit.id}/files`), {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${storedToken}` }, // Content-Type is not needed with FormData
                         body: formData
@@ -618,14 +629,14 @@ const App: React.FC = () => {
                             keywords: keywordsArray.length > 0 ? keywordsArray : undefined
                         }
                     };
-                    const metadataResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}`, {
+                    const metadataResponse = await fetch(proxied(`${baseUrl}/deposit/depositions/${deposit.id}`), {
                         method: 'PUT',
                         headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' },
                         body: JSON.stringify(metadataPayload)
                     });
                     if (!metadataResponse.ok) throw new Error('Falha ao atualizar metadados');
     
-                    const publishResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}/actions/publish`, {
+                    const publishResponse = await fetch(proxied(`${baseUrl}/deposit/depositions/${deposit.id}/actions/publish`), {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${storedToken}` }
                     });
