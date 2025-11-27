@@ -471,11 +471,13 @@ const App: React.FC = () => {
                 console.error(`Error processing article ${i}:`, error);
 
                 // Critical Error Handling: Stop automation on quota errors.
-                if (errorMessage.toLowerCase().includes('quota')) {
-                    setGenerationStatus(`🛑 Limite de cota da API atingido. A automação será pausada e reiniciada no próximo horário agendado.`);
-                    setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: 'upload_failed', latexCode: currentPaper, errorMessage: `Pausado por limite de cota: ${errorMessage}` }]);
-                    isGenerationCancelled.current = true; // Use this flag to signal a hard stop
-                    break; // Exit the loop immediately.
+                if (errorMessage.toLowerCase().includes('quota') || errorMessage.toLowerCase().includes('exhausted')) {
+                    // Try to continue if multiple keys are available? 
+                    // No, the service handles rotation. If we are here, ALL keys are dead.
+                    setGenerationStatus(`🛑 Limite de cota atingido em TODAS as chaves de API. A automação será pausada.`);
+                    setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: 'upload_failed', latexCode: currentPaper, errorMessage: `Pausado por limite de cota global: ${errorMessage}` }]);
+                    isGenerationCancelled.current = true; 
+                    break;
                 }
 
                 // Resilient Handling for other errors
@@ -884,7 +886,22 @@ const App: React.FC = () => {
     
     return (
         <div className="container">
-            <ApiKeyModal isOpen={isApiModalOpen} onClose={() => setIsApiModalOpen(false)} onSave={(keys) => { if (keys.gemini) localStorage.setItem('gemini_api_key', keys.gemini); if (keys.zenodo) setZenodoToken(keys.zenodo); if (keys.xai) localStorage.setItem('xai_api_key', keys.xai); setIsApiModalOpen(false); }} />
+            <ApiKeyModal 
+                isOpen={isApiModalOpen} 
+                onClose={() => setIsApiModalOpen(false)} 
+                onSave={(keys) => { 
+                    // Save Gemini Keys (Array)
+                    localStorage.setItem('gemini_api_keys', JSON.stringify(keys.gemini));
+                    // Save the first key as default for backward compatibility or simple usage
+                    if (keys.gemini.length > 0) {
+                        localStorage.setItem('gemini_api_key', keys.gemini[0]);
+                    }
+
+                    if (keys.zenodo) setZenodoToken(keys.zenodo); 
+                    if (keys.xai) localStorage.setItem('xai_api_key', keys.xai); 
+                    setIsApiModalOpen(false); 
+                }} 
+            />
             <PersonalDataModal
                 isOpen={isPersonalDataModalOpen}
                 onClose={() => setIsPersonalDataModalOpen(false)}

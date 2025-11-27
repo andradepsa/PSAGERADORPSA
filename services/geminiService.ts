@@ -10,60 +10,156 @@ const BABEL_LANG_MAP: Record<Language, string> = {
     fr: 'french',
 };
 
-const MAX_RETRIES = 5;
+// Internal Key Manager to track rotation state
+const KeyManager = {
+    keys: [] as string[],
+    currentIndex: 0,
+    initialized: false,
+
+    loadKeys: function() {
+        const storedKeys = localStorage.getItem('gemini_api_keys');
+        const legacyKey = localStorage.getItem('gemini_api_key') || (process.env.API_KEY as string);
+        
+        if (storedKeys) {
+            try {
+                const parsed = JSON.parse(storedKeys);
+                this.keys = Array.isArray(parsed) ? parsed.filter(k => k.trim() !== '') : [];
+            } catch {
+                this.keys = [];
+            }
+        }
+        
+        if (this.keys.length === 0 && legacyKey) {
+            this.keys = [legacyKey];
+        }
+
+        // Always check environment variable if keys list is still empty
+        if (this.keys.length === 0 && process.env.API_KEY) {
+             this.keys = [process.env.API_KEY];
+        }
+
+        this.initialized = true;
+    },
+
+    getCurrentKey: function(): string {
+        if (!this.initialized) this.loadKeys();
+        if (this.keys.length === 0) {
+            throw new Error("Gemini API key not found. Please add keys in the settings modal (gear icon).");
+        }
+        return this.keys[this.currentIndex];
+    },
+
+    rotate: function(): boolean {
+        if (this.keys.length <= 1) return false;
+        
+        const prevIndex = this.currentIndex;
+        this.currentIndex = (this.currentIndex + 1) % this.keys.length;
+        console.warn(`🔄 Rotating API Key: Switching from index ${prevIndex} to ${this.currentIndex}`);
+        return true;
+    }
+};
+
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Creates a new Gemini client instance, reading the API key from localStorage
-// with a fallback to process.env for environments where it's set.
+// Wrapper to create client with the CURRENT active key
 function getAiClient(): GoogleGenAI {
-    const apiKey = localStorage.getItem('gemini_api_key') || (process.env.API_KEY as string);
-    if (!apiKey) {
-        throw new Error("Gemini API key not found. Please set it in the settings modal (gear icon).");
-    }
+    const apiKey = KeyManager.getCurrentKey();
     return new GoogleGenAI({ apiKey });
 }
 
+// Executes an AI model call with automatic key rotation on Quota/429 errors
+async function executeWithKeyRotation<T>(
+    operation: (client: GoogleGenAI) => Promise<T>, 
+    modelName: string
+): Promise<T> {
+    
+    // Refresh keys from storage in case user added one mid-process
+    KeyManager.loadKeys(); 
+
+    // We allow trying each key once before giving up entirely on this specific request.
+    const maxAttempts = KeyManager.keys.length > 0 ? KeyManager.keys.length : 1;
+    
+    // However, if we only have 1 key, we still want to retry transient errors a few times.
+    // The inner retry logic inside `withRateLimitHandling` handles transient 500s/429s.
+    // This outer loop handles "Hard Quota" or "Persistent 429" by switching keys.
+    
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        try {
+            const client = getAiClient();
+            return await withRateLimitHandling(() => operation(client));
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
+            
+            // Check if error is related to quota or exhaustion
+            const isQuotaError = 
+                errorMessage.includes('429') || 
+                errorMessage.includes('quota') || 
+                errorMessage.includes('limit') || 
+                errorMessage.includes('exhausted');
+
+            // If it's a quota error and we have more keys, rotate and continue loop
+            if (isQuotaError && KeyManager.keys.length > 1) {
+                console.warn(`⚠️ API Key (Index ${KeyManager.currentIndex}) exhausted. Attempting to rotate...`);
+                KeyManager.rotate();
+                // We do NOT wait here; we switch keys and try immediately.
+                continue; 
+            }
+
+            // If it's not a quota error, or we ran out of keys, throw the error up
+            // Note: If we are on the last key and it fails with quota, the loop ends and we throw.
+            if (attempt === maxAttempts - 1) {
+                throw error;
+            }
+            
+            throw error; // Non-quota errors (like 400 Bad Request) shouldn't rotate keys usually.
+        }
+    }
+    
+    throw new Error("Unexpected end of key rotation loop.");
+}
+
 async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
+    const MAX_RETRIES = 3; // Reduced internal retries since we have key rotation now
+    
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
             return await apiCall(); // Success!
         } catch (error) {
-            console.warn(`API call failed on attempt ${attempt}.`, error);
             const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
             
-            // Check for hard failure (Quota limit: 0)
-            // This specifically handles the case where the user tries to use a model (like gemini-3)
-            // that isn't enabled or has 0 quota on their plan.
+            // Hard failure for model non-existence or strict 0 quota
             if (errorMessage.includes('limit: 0') || errorMessage.includes('quota exceeded for metric')) {
-                 throw new Error("API Quota Exceeded (Limit: 0). This model appears to be unavailable for your API key/Tier. Please select a different model (e.g., Gemini 2.5 Pro) in the settings.");
+                 throw new Error(`API Quota Exceeded (Limit: 0) or Model Unavailable: ${errorMessage}`);
             }
 
+            // If it's the last attempt, propagate error so rotation logic can catch it
             if (attempt === MAX_RETRIES) {
-                 if (errorMessage.includes('429') || errorMessage.includes('quota')) {
-                    throw new Error("You exceeded your current quota. Please wait a minute before trying again. For higher limits, check your plan and billing details.");
+                if (errorMessage.includes('429') || errorMessage.includes('quota')) {
+                    throw new Error(`Quota Exceeded (429): ${errorMessage}`);
                  }
                  if (errorMessage.includes('503') || errorMessage.includes('overloaded')) {
                     throw new Error("The AI model is temporarily overloaded. Please try again in a few moments.");
                  }
-                throw new Error("Failed to call the API after multiple attempts. Please check your connection and try again later.");
+                throw error;
             }
 
             let backoffTime;
-            
             if (errorMessage.includes('429') || errorMessage.includes('quota')) {
-                console.log("Rate limit exceeded. Waiting for 61 seconds before retrying...");
-                backoffTime = 61000 + Math.random() * 1000;
+                // If it's a 429, we might just need to wait a bit if it's rate limit vs quota.
+                // But if we have multiple keys, we prefer to fail fast in this inner loop 
+                // to trigger the outer rotation loop.
+                // Strategy: Wait once briefly. If it persists, throw to rotate.
+                backoffTime = 2000 + Math.random() * 1000;
             } else {
                 console.log("Transient error detected. Using exponential backoff...");
                 backoffTime = Math.pow(2, attempt) * 1000 + Math.random() * 250;
             }
             
-            console.log(`Waiting for ${backoffTime.toFixed(0)}ms before retrying...`);
+            console.log(`Waiting for ${backoffTime.toFixed(0)}ms before retrying on same key...`);
             await delay(backoffTime);
         }
     }
-    // This should be unreachable
-    throw new Error("API call failed after all retry attempts.");
+    throw new Error("API call failed after internal retries.");
 }
 
 // Central dispatcher for different AI models
@@ -78,19 +174,22 @@ async function callModel(
     } = {}
 ): Promise<GenerateContentResponse> {
     if (model.startsWith('gemini-')) {
-        const ai = getAiClient();
-        const apiCall = () => ai.models.generateContent({
-            model: model,
-            contents: userPrompt,
-            config: {
-                systemInstruction: systemInstruction,
-                ...(config.jsonOutput && { responseMimeType: "application/json" }),
-                ...(config.responseSchema && { responseSchema: config.responseSchema }),
-                ...(config.googleSearch && { tools: [{ googleSearch: {} }] }),
-            },
-        });
-        return withRateLimitHandling(apiCall);
+        // Wrap the generation logic in the rotation handler
+        return executeWithKeyRotation(async (aiClient) => {
+            return aiClient.models.generateContent({
+                model: model,
+                contents: userPrompt,
+                config: {
+                    systemInstruction: systemInstruction,
+                    ...(config.jsonOutput && { responseMimeType: "application/json" }),
+                    ...(config.responseSchema && { responseSchema: config.responseSchema }),
+                    ...(config.googleSearch && { tools: [{ googleSearch: {} }] }),
+                },
+            });
+        }, model);
+
     } else if (model.startsWith('grok-')) {
+        // Grok logic remains unchanged (single key support)
         const apiKey = localStorage.getItem('xai_api_key');
         if (!apiKey) {
             throw new Error("x.ai API key not found. Please set it in the settings modal (gear icon).");
@@ -124,14 +223,13 @@ async function callModel(
             const data = await response.json();
             const text = data.choices?.[0]?.message?.content || '';
             
-            // Reconstruct a Gemini-like response object for compatibility
             const reconstructedResponse = {
                 candidates: [{
                     content: { parts: [{ text: text }], role: 'model' },
                     finishReason: 'STOP',
                     index: 0,
                     safetyRatings: [],
-                    groundingMetadata: { groundingChunks: [] } // Grok does not support grounding
+                    groundingMetadata: { groundingChunks: [] }
                 }],
                 functionCalls: [],
                 get text() {
