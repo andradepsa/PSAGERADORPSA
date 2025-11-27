@@ -6,7 +6,10 @@ export async function onRequest(context) {
   const fields = url.searchParams.get('fields') || 'paperId,title,authors,abstract,url';
 
   if (!query) {
-    return new Response('Missing query param', { status: 400 });
+    return new Response(JSON.stringify({ error: 'Missing query param' }), { 
+      status: 400,
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+    });
   }
 
   const targetUrl = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(query)}&limit=${limit}&fields=${fields}`;

@@ -119,7 +119,7 @@ async function executeWithKeyRotation<T>(
 }
 
 async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
-    const MAX_RETRIES = 3; // Reduced internal retries since we have key rotation now
+    const MAX_RETRIES = 5; // Increased retries to handle 503 instability better
     
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
@@ -146,13 +146,10 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
             let backoffTime;
             if (errorMessage.includes('429') || errorMessage.includes('quota')) {
                 // If it's a 429, we might just need to wait a bit if it's rate limit vs quota.
-                // But if we have multiple keys, we prefer to fail fast in this inner loop 
-                // to trigger the outer rotation loop.
-                // Strategy: Wait once briefly. If it persists, throw to rotate.
                 backoffTime = 2000 + Math.random() * 1000;
             } else {
                 console.log("Transient error detected. Using exponential backoff...");
-                backoffTime = Math.pow(2, attempt) * 1000 + Math.random() * 250;
+                backoffTime = Math.pow(2, attempt) * 1000 + Math.random() * 500;
             }
             
             console.log(`Waiting for ${backoffTime.toFixed(0)}ms before retrying on same key...`);
@@ -263,9 +260,13 @@ export async function generatePaperTitle(topic: string, language: Language, mode
 
     const response = await callModel(model, systemInstruction, userPrompt);
     
+    if (!response.candidates || response.candidates.length === 0) {
+        throw new Error("AI returned no candidates for title. Prompt likely blocked by safety filters.");
+    }
+    
     // Safety check for empty response
     if (!response.text) {
-        throw new Error("AI returned an empty response for the title generation.");
+         throw new Error("AI returned an empty response text for the title generation.");
     }
     
     return response.text.trim().replace(/"/g, ''); // Clean up any accidental quotes
@@ -493,6 +494,10 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
         responseSchema: responseSchema
     });
     
+    if (!response.candidates || response.candidates.length === 0) {
+        throw new Error("AI returned no candidates for analysis.");
+    }
+
     // Safety check
     if (!response.text) {
         throw new Error("AI returned an empty response for the analysis.");
@@ -542,6 +547,10 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     const userPrompt = `Current Paper Content:\n\n${paperContent}\n\nImprovement Points:\n\n${improvementPoints}\n\nBased on the above improvement points, provide the complete, improved LaTeX source code for the paper.`;
 
     const response = await callModel(model, systemInstruction, userPrompt);
+    
+    if (!response.candidates || response.candidates.length === 0) {
+        throw new Error("AI returned no candidates for improvement.");
+    }
     
     // Safety check
     if (!response.text) {

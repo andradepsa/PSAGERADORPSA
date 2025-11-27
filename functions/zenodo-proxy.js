@@ -23,6 +23,7 @@ export async function onRequest(context) {
       body: request.body
     });
 
+    // We get the raw buffer to support binary files (PDFs) and JSON responses equally
     const data = await response.arrayBuffer();
 
     // Forward response headers and add CORS
