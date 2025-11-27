@@ -101,19 +101,19 @@ const App: React.FC = () => {
             const stored = localStorage.getItem('all_authors_data');
             const parsed = stored ? JSON.parse(stored) : [];
             if (parsed.length === 0) {
-                // Default fallback, will be overwritten by useEffect below
+                // Default to a single author if no data found
                 return [{ 
-                    name: 'Revista, Zen', 
-                    affiliation: 'Zenodo', 
-                    orcid: '0009-0007-6299-2008' 
+                    name: 'SÉRGIO DE ANDRADE, PAULO', 
+                    affiliation: 'Faculdade de Guarulhos (FG)', 
+                    orcid: '0009-0004-2555-3178' 
                 }];
             }
             return parsed;
         } catch {
             return [{ 
-                name: 'Revista, Zen', 
-                affiliation: 'Zenodo', 
-                orcid: '0009-0007-6299-2008' 
+                name: 'SÉRGIO DE ANDRADE, PAULO', 
+                affiliation: 'Faculdade de Guarulhos (FG)', 
+                orcid: '0009-0004-2555-3178' 
             }];
         }
     });
@@ -146,41 +146,6 @@ const App: React.FC = () => {
         });
         return () => unsubscribe();
     }, []);
-
-    // Effect to strictly control authors based on Discipline selection
-    useEffect(() => {
-        const DISCIPLINE_AUTHOR_MAP: Record<string, string> = {
-            "History of Humanity": "HISTORY, 10",
-            "Mathematics": "MATH, 10",
-            "Geography": "GEOGRAPHY, 10",
-            "Biology": "BIOLOGY, 10",
-            "Chemistry": "CHEMISTRY, 10",
-            "Physics": "PHYSICS, 10",
-            "Astronomy & Astrophysics": "ASTRO, 10",
-            "Philosophy": "PHILOSOPHY, 10",
-            "Literature": "LITERATURE, 10"
-        };
-
-        const author2Name = DISCIPLINE_AUTHOR_MAP[selectedDiscipline];
-        const FIXED_ORCID = "0009-0007-6299-2008";
-        // Assuming 'Zenodo' affiliation is acceptable as it is required by the app's validation logic
-        const DEFAULT_AFFILIATION = "Zenodo"; 
-
-        if (author2Name) {
-            setAuthors([
-                {
-                    name: "Revista, Zen",
-                    affiliation: DEFAULT_AFFILIATION,
-                    orcid: FIXED_ORCID
-                },
-                {
-                    name: author2Name,
-                    affiliation: DEFAULT_AFFILIATION,
-                    orcid: FIXED_ORCID
-                }
-            ]);
-        }
-    }, [selectedDiscipline]);
     
     // Update zenodoToken in localStorage whenever it changes
     useEffect(() => {
