@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide } from './services/geminiService';
 import type { Language, IterationAnalysis, PaperSource, AnalysisResult, StyleGuide, ArticleEntry, PersonalData } from './types';
-import { LANGUAGES, AVAILABLE_MODELS, ANALYSIS_TOPICS, ALL_TOPICS_BY_DISCIPLINE, getAllDisciplines, getRandomTopic, FIX_OPTIONS, STYLE_GUIDES, TOTAL_ITERATIONS } from './constants';
+import { LANGUAGES, AVAILABLE_MODELS, ANALYSIS_TOPICS, ALL_TOPICS_BY_DISCIPLINE, getAllDisciplines, getRandomTopic, FIX_OPTIONS, STYLE_GUIDES, TOTAL_ITERATIONS, DISCIPLINE_AUTHORS } from './constants';
 
 
 import LanguageSelector from './components/LanguageSelector';
@@ -155,6 +155,24 @@ const App: React.FC = () => {
             console.error("Failed to save author data to localStorage", error);
         }
     }, [authors]);
+
+    // Effect to automatically update authors based on selected discipline
+    useEffect(() => {
+        const fixedAuthor1 = {
+            name: 'Revista, Zen',
+            affiliation: 'Faculdade de Guarulhos (FG)',
+            orcid: '0009-0007-6299-2008'
+        };
+
+        const author2Name = DISCIPLINE_AUTHORS[selectedDiscipline] || 'RESEARCHER, 10';
+        const dynamicAuthor2 = {
+            name: author2Name,
+            affiliation: 'Faculdade de Guarulhos (FG)',
+            orcid: '0009-0007-6299-2008'
+        };
+
+        setAuthors([fixedAuthor1, dynamicAuthor2]);
+    }, [selectedDiscipline]);
 
     // Effect to save all article entries to localStorage
     useEffect(() => {
