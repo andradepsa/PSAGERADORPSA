@@ -103,17 +103,17 @@ const App: React.FC = () => {
             if (parsed.length === 0) {
                 // Default to a single author if no data found
                 return [{ 
-                    name: 'SÉRGIO DE ANDRADE, PAULO', 
-                    affiliation: 'Faculdade de Guarulhos (FG)', 
-                    orcid: '0009-0004-2555-3178' 
+                    name: 'Revista, Zen', 
+                    affiliation: 'Scientific Journal', 
+                    orcid: '0009-0007-6299-2008' 
                 }];
             }
             return parsed;
         } catch {
             return [{ 
-                name: 'SÉRGIO DE ANDRADE, PAULO', 
-                affiliation: 'Faculdade de Guarulhos (FG)', 
-                orcid: '0009-0004-2555-3178' 
+                name: 'Revista, Zen', 
+                affiliation: 'Scientific Journal', 
+                orcid: '0009-0007-6299-2008' 
             }];
         }
     });
@@ -155,6 +155,39 @@ const App: React.FC = () => {
             localStorage.removeItem('zenodo_api_key');
         }
     }, [zenodoToken]);
+
+    // Effect to automatically update authors based on selected discipline
+    useEffect(() => {
+        const disciplineAuthorMap: Record<string, string> = {
+            "Mathematics": "MATH, 10",
+            "History of Humanity": "HISTORY, 10",
+            "Geography": "GEOGRAPHY, 10",
+            "Biology": "BIOLOGY, 10",
+            "Chemistry": "CHEMISTRY, 10",
+            "Physics": "PHYSICS, 10",
+            "Astronomy & Astrophysics": "ASTRO, 10",
+            "Philosophy": "PHILOSOPHY, 10",
+            "Literature": "LITERATURE, 10"
+        };
+
+        const author2Name = disciplineAuthorMap[selectedDiscipline] || "RESEARCHER, 10";
+        const commonOrcid = "0009-0007-6299-2008";
+
+        const newAuthors: PersonalData[] = [
+            { 
+                name: 'Revista, Zen', 
+                affiliation: 'Scientific Journal', 
+                orcid: commonOrcid 
+            },
+            { 
+                name: author2Name, 
+                affiliation: `Department of ${selectedDiscipline}`, 
+                orcid: commonOrcid 
+            }
+        ];
+        
+        setAuthors(newAuthors);
+    }, [selectedDiscipline]);
 
     // Effect to save all author personal data to localStorage
     useEffect(() => {
