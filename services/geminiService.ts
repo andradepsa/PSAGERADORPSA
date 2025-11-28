@@ -16,86 +16,33 @@ const KeyManager = {
     currentIndex: 0,
     initialized: false,
 
-    touchKey: function(index: number) {
-        try {
-            const usageStore = localStorage.getItem('gemini_key_last_used');
-            const usage = usageStore ? JSON.parse(usageStore) : {};
-            usage[index] = Date.now();
-            localStorage.setItem('gemini_key_last_used', JSON.stringify(usage));
-        } catch (e) {
-            // Ignore storage errors
-        }
-    },
-
     loadKeys: function() {
         const storedKeys = localStorage.getItem('gemini_api_keys');
         const legacyKey = localStorage.getItem('gemini_api_key') || (process.env.API_KEY as string);
         
-        let newKeys: string[] = [];
-
         if (storedKeys) {
             try {
                 const parsed = JSON.parse(storedKeys);
-                newKeys = Array.isArray(parsed) ? parsed.filter(k => k.trim() !== '') : [];
+                this.keys = Array.isArray(parsed) ? parsed.filter(k => k.trim() !== '') : [];
             } catch {
-                newKeys = [];
+                this.keys = [];
             }
         }
         
-        if (newKeys.length === 0 && legacyKey) {
-            newKeys = [legacyKey];
+        if (this.keys.length === 0 && legacyKey) {
+            this.keys = [legacyKey];
         }
 
         // Always check environment variable if keys list is still empty
-        if (newKeys.length === 0 && process.env.API_KEY) {
-             newKeys = [process.env.API_KEY];
+        if (this.keys.length === 0 && process.env.API_KEY) {
+             this.keys = [process.env.API_KEY];
         }
 
-        this.keys = newKeys;
-
-        // STRATEGY FOR MULTI-WINDOW SUPPORT (LRU - Least Recently Used):
-        // We track the last usage timestamp of each key in localStorage.
-        // When a new window opens, it picks the key that hasn't been used for the longest time.
-        // This ensures that if 10 tabs are opened, they assign themselves unique keys (if available)
-        // rather than all colliding on Key #1.
-        if (!this.initialized && this.keys.length > 0) {
-            try {
-                const usageStore = localStorage.getItem('gemini_key_last_used');
-                const usage = usageStore ? JSON.parse(usageStore) : {};
-                
-                // Map keys to their last usage time (0 if never used)
-                const keysWithUsage = this.keys.map((_, index) => ({
-                    index,
-                    lastUsed: usage[index] || 0
-                }));
-                
-                // Sort by lastUsed ascending (oldest timestamp first)
-                keysWithUsage.sort((a, b) => a.lastUsed - b.lastUsed);
-                
-                // Pick the "coldest" key
-                this.currentIndex = keysWithUsage[0].index;
-                console.log(`[KeyManager] Window initialized. Selected LRU Key Index: ${this.currentIndex + 1}/${this.keys.length}`);
-                
-                // Mark as used immediately so other simultaneous openers pick the next one
-                this.touchKey(this.currentIndex);
-                
-            } catch (e) {
-                // Fallback to random if something breaks
-                this.currentIndex = Math.floor(Math.random() * this.keys.length);
-                console.warn("[KeyManager] LRU selection error, fallback to random:", e);
-            }
-            this.initialized = true;
-        } else if (this.keys.length > 0) {
-            // Ensure index is within bounds if keys were removed externally via settings
-            if (this.currentIndex >= this.keys.length) {
-                this.currentIndex = 0;
-            }
-        }
+        this.initialized = true;
     },
 
     getCurrentKey: function(): string {
-        // We load keys to ensure we have the latest list
-        this.loadKeys(); 
+        if (!this.initialized) this.loadKeys();
         if (this.keys.length === 0) {
             throw new Error("Gemini API key not found. Please add keys in the settings modal (gear icon).");
         }
@@ -108,9 +55,6 @@ const KeyManager = {
         const prevIndex = this.currentIndex;
         this.currentIndex = (this.currentIndex + 1) % this.keys.length;
         console.warn(`🔄 Rotating API Key: Switching from index ${prevIndex} to ${this.currentIndex}`);
-        
-        // Mark the new key as active so LRU logic knows it's busy
-        this.touchKey(this.currentIndex);
         return true;
     }
 };
@@ -120,8 +64,6 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 // Wrapper to create client with the CURRENT active key
 function getAiClient(): GoogleGenAI {
     const apiKey = KeyManager.getCurrentKey();
-    // Refresh the timestamp to keep this key "claimed" by this active window
-    KeyManager.touchKey(KeyManager.currentIndex);
     return new GoogleGenAI({ apiKey });
 }
 
@@ -131,11 +73,15 @@ async function executeWithKeyRotation<T>(
     modelName: string
 ): Promise<T> {
     
-    // Ensure keys are loaded. 
+    // Refresh keys from storage in case user added one mid-process
     KeyManager.loadKeys(); 
 
     // We allow trying each key once before giving up entirely on this specific request.
     const maxAttempts = KeyManager.keys.length > 0 ? KeyManager.keys.length : 1;
+    
+    // However, if we only have 1 key, we still want to retry transient errors a few times.
+    // The inner retry logic inside `withRateLimitHandling` handles transient 500s/429s.
+    // This outer loop handles "Hard Quota" or "Persistent 429" by switching keys.
     
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
         try {
@@ -155,26 +101,21 @@ async function executeWithKeyRotation<T>(
             if (isQuotaError && KeyManager.keys.length > 1) {
                 console.warn(`⚠️ API Key (Index ${KeyManager.currentIndex}) exhausted. Attempting to rotate...`);
                 KeyManager.rotate();
-                
-                // Add a small safety delay during rotation
-                await delay(1000); 
-                
+                // We do NOT wait here; we switch keys and try immediately.
                 continue; 
             }
 
             // If it's not a quota error, or we ran out of keys, throw the error up
+            // Note: If we are on the last key and it fails with quota, the loop ends and we throw.
             if (attempt === maxAttempts - 1) {
-                if (isQuotaError) {
-                    throw new Error(`All Gemini API Keys exhausted (Quota/429). Last error: ${errorMessage}`);
-                }
                 throw error;
             }
             
-            throw error; 
+            throw error; // Non-quota errors (like 400 Bad Request) shouldn't rotate keys usually.
         }
     }
     
-    throw new Error("All Gemini API Keys exhausted (Rotation loop ended without success).");
+    throw new Error("Unexpected end of key rotation loop.");
 }
 
 async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
