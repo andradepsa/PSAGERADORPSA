@@ -147,7 +147,7 @@ async function executeWithKeyRotation<T>(
 }
 
 async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
-    const MAX_RETRIES = 5; // Increased retries to handle 503 instability better
+    const MAX_RETRIES = 5; 
     
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
@@ -160,9 +160,19 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
                  throw new Error(`API Quota Exceeded (Limit: 0) or Model Unavailable: ${errorMessage}`);
             }
 
-            // If it's the last attempt, propagate error so rotation logic can catch it
+            const isQuotaError = errorMessage.includes('429') || errorMessage.includes('quota') || errorMessage.includes('exhausted');
+            const hasBackupKeys = KeyManager.keys.length > 1;
+
+            // OPTIMIZATION: If we hit a quota limit and have other keys available, 
+            // throw immediately so `executeWithKeyRotation` can switch to the next key.
+            // Do NOT waste time retrying on a dead key if we have backups.
+            if (isQuotaError && hasBackupKeys) {
+                throw error;
+            }
+
+            // If it's the last attempt, propagate error so rotation logic can catch it (if applicable) or fail
             if (attempt === MAX_RETRIES) {
-                if (errorMessage.includes('429') || errorMessage.includes('quota')) {
+                if (isQuotaError) {
                     throw new Error(`Quota Exceeded (429): ${errorMessage}`);
                  }
                  if (errorMessage.includes('503') || errorMessage.includes('overloaded')) {
@@ -172,10 +182,11 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
             }
 
             let backoffTime;
-            if (errorMessage.includes('429') || errorMessage.includes('quota')) {
-                // If it's a 429, we might just need to wait a bit if it's rate limit vs quota.
+            if (isQuotaError) {
+                // If we are here, we have only 1 key (or no backups loaded) and hit 429. We must wait.
                 backoffTime = 2000 + Math.random() * 1000;
             } else {
+                // Transient error (503, etc). Exponential backoff.
                 console.log("Transient error detected. Using exponential backoff...");
                 backoffTime = Math.pow(2, attempt) * 1000 + Math.random() * 500;
             }
