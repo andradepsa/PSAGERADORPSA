@@ -86,6 +86,21 @@ function getAiClient(): GoogleGenAI {
     return new GoogleGenAI({ apiKey });
 }
 
+// Helper to identify errors that should trigger a key rotation (Quota, Rate Limit, Suspension)
+function isRotationTrigger(error: any): boolean {
+    const errorMessage = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+    return (
+        errorMessage.includes('429') || 
+        errorMessage.includes('quota') || 
+        errorMessage.includes('limit') || 
+        errorMessage.includes('exhausted') ||
+        errorMessage.includes('403') || 
+        errorMessage.includes('permission denied') ||
+        errorMessage.includes('suspended') ||
+        errorMessage.includes('consumer') // often appears in suspension messages
+    );
+}
+
 // Executes an AI model call with automatic key rotation on Quota/429 errors
 async function executeWithKeyRotation<T>(
     operation: (client: GoogleGenAI) => Promise<T>, 
@@ -111,15 +126,11 @@ async function executeWithKeyRotation<T>(
             const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
             
             // Check if error is related to quota or exhaustion
-            const isQuotaError = 
-                errorMessage.includes('429') || 
-                errorMessage.includes('quota') || 
-                errorMessage.includes('limit') || 
-                errorMessage.includes('exhausted');
+            const shouldRotate = isRotationTrigger(error);
 
-            // If it's a quota error and we have more keys, rotate and continue loop
-            if (isQuotaError && KeyManager.keys.length > 1) {
-                console.warn(`⚠️ API Key (Index ${KeyManager.currentIndex}) exhausted. Attempting to rotate...`);
+            // If it's a quota/auth error and we have more keys, rotate and continue loop
+            if (shouldRotate && KeyManager.keys.length > 1) {
+                console.warn(`⚠️ API Key (Index ${KeyManager.currentIndex}) exhausted or suspended. Attempting to rotate... Error: ${errorMessage}`);
                 KeyManager.rotate();
                 
                 // Add a small safety delay during rotation to prevent IP-based rate limiting from Google
@@ -133,8 +144,8 @@ async function executeWithKeyRotation<T>(
             // Note: If we are on the last key and it fails with quota, the loop ends and we throw.
             if (attempt === maxAttempts - 1) {
                 // If this was the last key, we modify the error message to ensure App.tsx detects it as exhaustion
-                if (isQuotaError) {
-                    throw new Error(`All Gemini API Keys exhausted (Quota/429). Last error: ${errorMessage}`);
+                if (shouldRotate) {
+                    throw new Error(`All Gemini API Keys exhausted (Quota/Suspended). Last error: ${errorMessage}`);
                 }
                 throw error;
             }
@@ -160,20 +171,20 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
                  throw new Error(`API Quota Exceeded (Limit: 0) or Model Unavailable: ${errorMessage}`);
             }
 
-            const isQuotaError = errorMessage.includes('429') || errorMessage.includes('quota') || errorMessage.includes('exhausted');
+            const shouldRotate = isRotationTrigger(error);
             const hasBackupKeys = KeyManager.keys.length > 1;
 
-            // OPTIMIZATION: If we hit a quota limit and have other keys available, 
+            // OPTIMIZATION: If we hit a quota/auth limit and have other keys available, 
             // throw immediately so `executeWithKeyRotation` can switch to the next key.
             // Do NOT waste time retrying on a dead key if we have backups.
-            if (isQuotaError && hasBackupKeys) {
+            if (shouldRotate && hasBackupKeys) {
                 throw error;
             }
 
             // If it's the last attempt, propagate error so rotation logic can catch it (if applicable) or fail
             if (attempt === MAX_RETRIES) {
-                if (isQuotaError) {
-                    throw new Error(`Quota Exceeded (429): ${errorMessage}`);
+                if (shouldRotate) {
+                    throw new Error(`Quota Exceeded or Key Suspended: ${errorMessage}`);
                  }
                  if (errorMessage.includes('503') || errorMessage.includes('overloaded')) {
                     throw new Error("The AI model is temporarily overloaded. Please try again in a few moments.");
@@ -182,8 +193,9 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
             }
 
             let backoffTime;
-            if (isQuotaError) {
-                // If we are here, we have only 1 key (or no backups loaded) and hit 429. We must wait.
+            if (shouldRotate) {
+                // If we are here, we have only 1 key (or no backups loaded) and hit 429/403. We must wait.
+                // Note: Waiting on 403 Suspended won't help, but logic dictates we try if no backups.
                 backoffTime = 2000 + Math.random() * 1000;
             } else {
                 // Transient error (503, etc). Exponential backoff.
