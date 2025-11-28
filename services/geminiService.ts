@@ -101,13 +101,21 @@ async function executeWithKeyRotation<T>(
             if (isQuotaError && KeyManager.keys.length > 1) {
                 console.warn(`⚠️ API Key (Index ${KeyManager.currentIndex}) exhausted. Attempting to rotate...`);
                 KeyManager.rotate();
-                // We do NOT wait here; we switch keys and try immediately.
+                
+                // Add a small safety delay during rotation to prevent IP-based rate limiting from Google
+                // when hammering multiple keys in milliseconds.
+                await delay(1000); 
+                
                 continue; 
             }
 
             // If it's not a quota error, or we ran out of keys, throw the error up
             // Note: If we are on the last key and it fails with quota, the loop ends and we throw.
             if (attempt === maxAttempts - 1) {
+                // If this was the last key, we modify the error message to ensure App.tsx detects it as exhaustion
+                if (isQuotaError) {
+                    throw new Error(`All Gemini API Keys exhausted (Quota/429). Last error: ${errorMessage}`);
+                }
                 throw error;
             }
             
@@ -115,7 +123,7 @@ async function executeWithKeyRotation<T>(
         }
     }
     
-    throw new Error("Unexpected end of key rotation loop.");
+    throw new Error("All Gemini API Keys exhausted (Rotation loop ended without success).");
 }
 
 async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
