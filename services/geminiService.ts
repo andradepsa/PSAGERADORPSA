@@ -20,29 +20,48 @@ const KeyManager = {
         const storedKeys = localStorage.getItem('gemini_api_keys');
         const legacyKey = localStorage.getItem('gemini_api_key') || (process.env.API_KEY as string);
         
+        let newKeys: string[] = [];
+
         if (storedKeys) {
             try {
                 const parsed = JSON.parse(storedKeys);
-                this.keys = Array.isArray(parsed) ? parsed.filter(k => k.trim() !== '') : [];
+                newKeys = Array.isArray(parsed) ? parsed.filter(k => k.trim() !== '') : [];
             } catch {
-                this.keys = [];
+                newKeys = [];
             }
         }
         
-        if (this.keys.length === 0 && legacyKey) {
-            this.keys = [legacyKey];
+        if (newKeys.length === 0 && legacyKey) {
+            newKeys = [legacyKey];
         }
 
         // Always check environment variable if keys list is still empty
-        if (this.keys.length === 0 && process.env.API_KEY) {
-             this.keys = [process.env.API_KEY];
+        if (newKeys.length === 0 && process.env.API_KEY) {
+             newKeys = [process.env.API_KEY];
         }
 
-        this.initialized = true;
+        this.keys = newKeys;
+
+        // STRATEGY FOR MULTI-WINDOW SUPPORT:
+        // If this is the first time loading in this window session,
+        // pick a RANDOM starting index instead of 0. 
+        // This ensures that if 10 tabs are opened, they statistically distribute 
+        // themselves across the available keys rather than all hitting Key #1 simultaneously.
+        if (!this.initialized && this.keys.length > 0) {
+            this.currentIndex = Math.floor(Math.random() * this.keys.length);
+            console.log(`[KeyManager] Window initialized. Randomly selected starting API Key Index: ${this.currentIndex + 1}/${this.keys.length}`);
+            this.initialized = true;
+        } else if (this.keys.length > 0) {
+            // Ensure index is within bounds if keys were removed externally via settings
+            if (this.currentIndex >= this.keys.length) {
+                this.currentIndex = 0;
+            }
+        }
     },
 
     getCurrentKey: function(): string {
-        if (!this.initialized) this.loadKeys();
+        // We load keys to ensure we have the latest list, but we rely on the random index set during initialization
+        this.loadKeys(); 
         if (this.keys.length === 0) {
             throw new Error("Gemini API key not found. Please add keys in the settings modal (gear icon).");
         }
@@ -73,7 +92,8 @@ async function executeWithKeyRotation<T>(
     modelName: string
 ): Promise<T> {
     
-    // Refresh keys from storage in case user added one mid-process
+    // Ensure keys are loaded. 
+    // Note: loadKeys() will maintain the current randomized index for this window unless the list changed drastically.
     KeyManager.loadKeys(); 
 
     // We allow trying each key once before giving up entirely on this specific request.
@@ -101,13 +121,21 @@ async function executeWithKeyRotation<T>(
             if (isQuotaError && KeyManager.keys.length > 1) {
                 console.warn(`⚠️ API Key (Index ${KeyManager.currentIndex}) exhausted. Attempting to rotate...`);
                 KeyManager.rotate();
-                // We do NOT wait here; we switch keys and try immediately.
+                
+                // Add a small safety delay during rotation to prevent IP-based rate limiting from Google
+                // when hammering multiple keys in milliseconds.
+                await delay(1000); 
+                
                 continue; 
             }
 
             // If it's not a quota error, or we ran out of keys, throw the error up
             // Note: If we are on the last key and it fails with quota, the loop ends and we throw.
             if (attempt === maxAttempts - 1) {
+                // If this was the last key, we modify the error message to ensure App.tsx detects it as exhaustion
+                if (isQuotaError) {
+                    throw new Error(`All Gemini API Keys exhausted (Quota/429). Last error: ${errorMessage}`);
+                }
                 throw error;
             }
             
@@ -115,7 +143,7 @@ async function executeWithKeyRotation<T>(
         }
     }
     
-    throw new Error("Unexpected end of key rotation loop.");
+    throw new Error("All Gemini API Keys exhausted (Rotation loop ended without success).");
 }
 
 async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {

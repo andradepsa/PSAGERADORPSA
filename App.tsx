@@ -479,10 +479,13 @@ const App: React.FC = () => {
                 const errorMessage = error instanceof Error ? error.message : `Ocorreu um erro desconhecido no artigo ${i}.`;
                 console.error(`Error processing article ${i}:`, error);
 
-                // Critical Error Handling: Stop automation on quota errors.
-                if (errorMessage.toLowerCase().includes('quota') || errorMessage.toLowerCase().includes('exhausted')) {
-                    // Try to continue if multiple keys are available? 
-                    // No, the service handles rotation. If we are here, ALL keys are dead.
+                // Critical Error Handling: Stop automation on quota errors OR when rotation loop exhausted.
+                const lowerMsg = errorMessage.toLowerCase();
+                if (
+                    lowerMsg.includes('quota') || 
+                    lowerMsg.includes('exhausted') || 
+                    lowerMsg.includes('rotation loop')
+                ) {
                     setGenerationStatus(`🛑 Limite de cota atingido em TODAS as chaves de API. A automação será pausada.`);
                     setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: 'upload_failed', latexCode: currentPaper, errorMessage: `Pausado por limite de cota global: ${errorMessage}` }]);
                     isGenerationCancelled.current = true; 
@@ -494,7 +497,7 @@ const App: React.FC = () => {
                 setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: status, latexCode: currentPaper, errorMessage: errorMessage }]);
                 
                 let pauseDuration = 3000;
-                if (errorMessage.toLowerCase().includes('network') || errorMessage.toLowerCase().includes('fetch')) {
+                if (lowerMsg.includes('network') || lowerMsg.includes('fetch')) {
                     setGenerationStatus(`🔌 Problema de rede detectado. Pausando por 1 minuto...`);
                     pauseDuration = 60000;
                 } else {
