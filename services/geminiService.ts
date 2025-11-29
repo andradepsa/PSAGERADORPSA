@@ -135,7 +135,7 @@ async function executeWithKeyRotation<T>(
                 
                 // Add a small safety delay during rotation to prevent IP-based rate limiting from Google
                 // when hammering multiple keys in milliseconds.
-                await delay(1000); 
+                await delay(2000); 
                 
                 continue; 
             }
@@ -196,7 +196,8 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
             if (shouldRotate) {
                 // If we are here, we have only 1 key (or no backups loaded) and hit 429/403. We must wait.
                 // Note: Waiting on 403 Suspended won't help, but logic dictates we try if no backups.
-                backoffTime = 2000 + Math.random() * 1000;
+                // UPDATED: Increased backoff time to 5s-7s to allow RPM buffer to clear.
+                backoffTime = 5000 + Math.random() * 2000;
             } else {
                 // Transient error (503, etc). Exponential backoff.
                 console.log("Transient error detected. Using exponential backoff...");
