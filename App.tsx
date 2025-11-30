@@ -1,3 +1,5 @@
+
+
 import React, { useState, useEffect, useRef } from 'react';
 import { generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide } from './services/geminiService';
 import type { Language, IterationAnalysis, PaperSource, AnalysisResult, StyleGuide, ArticleEntry, PersonalData } from './types';
@@ -521,14 +523,14 @@ const App: React.FC = () => {
                 return "❌ Automação cancelada pelo usuário."; // Default manual cancellation message
             });
         } else if (isContinuousMode) {
-            setGenerationStatus(`✅ Artigo concluído. Pausa estratégica de 30s para recuperar cota da API...`);
+            setGenerationStatus(`✅ Artigo concluído. Pausa estratégica de 60s para recuperar cota da API...`);
             setTimeout(() => {
                 // Double-check flags before re-starting
                 if (isContinuousMode && !isGenerationCancelled.current) {
                     // Start next cycle with just 1 article to keep cooldowns active
                     handleFullAutomation(1);
                 }
-            }, 30000); // 30 seconds wait
+            }, 60000); // Increased to 60 seconds wait
         } else {
             // This is for a normal, single batch completion
             setGenerationProgress(100);

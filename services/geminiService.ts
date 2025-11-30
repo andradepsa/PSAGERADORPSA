@@ -334,9 +334,21 @@ export async function generatePaperTitle(topic: string, language: Language, mode
 // Programmatic post-processing to fix common LaTeX issues
 function postProcessLatex(latexCode: string): string {
     // Robustly replace ampersands used for authors in bibliographies
-    // This looks for "Name, A. & Name, B." and similar patterns.
-    // It's safer than a global replace to avoid affecting tables or math environments.
-    return latexCode.replace(/,?\s+&\s+/g, ' and ');
+    let code = latexCode.replace(/,?\s+&\s+/g, ' and ');
+    
+    // CRITICAL: Strip CJK (Chinese, Japanese, Korean) characters
+    // The default pdflatex compiler does not support these characters and will crash.
+    // We remove them to ensure the paper compiles.
+    // Ranges:
+    // \u4e00-\u9fff (Common CJK)
+    // \u3400-\u4dbf (Extension A)
+    // \uf900-\ufaff (Compatibility)
+    // \u3040-\u309f (Hiragana)
+    // \u30a0-\u30ff (Katakana)
+    // \uac00-\ud7af (Hangul)
+    code = code.replace(/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g, '');
+
+    return code;
 }
 
 /**
@@ -421,7 +433,8 @@ export async function generateInitialPaper(title: string, language: Language, pa
     -   **Example (Correct):** "Smith, J. and J. Doe."
 7.  **CRITICAL RULE - OTHER CHARACTERS:** You must also properly escape other special LaTeX characters like '%', '$', '#', '_', '{', '}'. For example, an underscore must be written as \`\\_\`.
 8.  **CRITICAL RULE - NO URLs:** References must **NOT** contain any URLs or web links. Format them as academic citations only, without any \`\\url{}\` commands.
-9.  **CRITICAL RULE - METADATA:** Do NOT place complex content inside the \`\\hypersetup{...}\` command. Only the title and author should be there.
+9.  **CRITICAL RULE - NO CJK CHARACTERS:** Do **NOT** use Chinese, Japanese, or Korean characters (like 霸, ba) in the document. The compiler strictly supports Latin characters only. If a term is inherently Asian, use its Pinyin or Romanized transliteration instead (e.g., use "Ba" instead of the character).
+10. **CRITICAL RULE - METADATA:** Do NOT place complex content inside the \`\\hypersetup{...}\` command. Only the title and author should be there.
 `;
 
     // Dynamically insert the babel package and reference placeholders into the template for the prompt
@@ -595,6 +608,7 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     -   The language of the entire paper must remain in **${languageName}**.
     -   **CRITICAL: Absolutely DO NOT use the \`\\begin{thebibliography}\`, \`\\end{thebibliography}\`, or \`\\bibitem\` commands anywhere in the document. The references MUST be formatted as a plain, unnumbered list directly following \`\\section{Referências}\`.**
     -   **CRITICAL RULE - AVOID AMPERSAND:** You **MUST NOT** use the ampersand character ('&'). Use the word 'and' instead, especially for separating author names.
+    -   **CRITICAL RULE - NO CJK CHARACTERS:** Do NOT introduce any Chinese, Japanese, or Korean characters. Use transliteration (Pinyin) if needed.
     -   **Do NOT use the \`\\cite{}\` command anywhere in the text.**
     -   **Do NOT add or remove \`\\newpage\` commands. Let the LaTeX engine handle page breaks automatically.**
     -   **Crucially, do NOT include any images, figures, organograms, flowcharts, diagrams, or complex tables in the improved paper.**
@@ -634,12 +648,13 @@ export async function fixLatexPaper(paperContent: string, compilationError: stri
     3.  **DO NOT** rewrite or refactor large sections of the document. Make the smallest change possible.
     4.  The entire output **MUST** be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) before \`\\documentclass\` or after \`\\end{document}\`.
     5.  **HIGHEST PRIORITY:** If the error message is "Misplaced alignment tab character &", the problem is an unescaped ampersand ('&'). Your primary action MUST be to find every instance of '&' and replace it with the word 'and', especially in the reference list. Example Fix: Change "Bondal, A., & Orlov, D." to "Bondal, A. and Orlov, D.". This is the most common and critical error to fix.
-    6.  Generally maintain the preamble, BUT if the compilation error is directly related to the preamble (especially the \\hypersetup command or metadata), you MUST fix it by removing or simplifying the problematic fields. **CRITICAL: The author block, including \\author{} and related commands, is pre-filled by the application and should be preserved verbatim by the LLM. Do NOT change or overwrite it.**
-    7.  **DO NOT** use commands like \`\\begin{thebibliography}\`, \`\\bibitem\`, or \`\\cite{}\`.
-    8.  **DO NOT** add or remove \`\\newpage\` commands.
-    9.  **DO NOT** include any images, figures, or complex tables.
-    10. **CRITICAL:** Ensure that no URLs are present in the references section.
-    11. Return only the corrected LaTeX source code.
+    6.  **UNICODE ERROR PRIORITY:** If the error mentions "Unicode character" (e.g., Chinese, Japanese characters like 霸), you **MUST REMOVE** that character or replace it with its Pinyin/English equivalent. The compiler does not support CJK characters.
+    7.  Generally maintain the preamble, BUT if the compilation error is directly related to the preamble (especially the \\hypersetup command or metadata), you MUST fix it by removing or simplifying the problematic fields. **CRITICAL: The author block, including \\author{} and related commands, is pre-filled by the application and should be preserved verbatim by the LLM. Do NOT change or overwrite it.**
+    8.  **DO NOT** use commands like \`\\begin{thebibliography}\`, \`\\bibitem\`, or \`\\cite{}\`.
+    9.  **DO NOT** add or remove \`\\newpage\` commands.
+    10. **DO NOT** include any images, figures, or complex tables.
+    11. **CRITICAL:** Ensure that no URLs are present in the references section.
+    12. Return only the corrected LaTeX source code.
     `;
 
     const userPrompt = `The following LaTeX document failed to compile. Analyze the error message and the code, then provide the complete, corrected LaTeX source code.
