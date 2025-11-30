@@ -1,10 +1,10 @@
 
+
 import type { LanguageOption, AnalysisTopic, StyleGuideOption } from './types';
 
-// Otimização de Cota: Reduzido de 12 para 5.
-// 12 iterações consomem tokens excessivos (aprox. 500k tokens por artigo).
-// 5 iterações são suficientes para atingir alta qualidade (score > 9.0).
-export const TOTAL_ITERATIONS = 5;
+// Otimização de Cota: Reduzido de 5 para 2.
+// Artigos longos consomem muitos tokens. 2 iterações são o equilíbrio ideal para contas gratuitas.
+export const TOTAL_ITERATIONS = 2;
 
 export const LANGUAGES: LanguageOption[] = [
     { code: 'en', name: 'English', flag: '🇬🇧' },

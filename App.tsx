@@ -1,3 +1,5 @@
+
+
 import React, { useState, useEffect, useRef } from 'react';
 import { generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide } from './services/geminiService';
 import type { Language, IterationAnalysis, PaperSource, AnalysisResult, StyleGuide, ArticleEntry, PersonalData } from './types';
@@ -709,17 +711,25 @@ const App: React.FC = () => {
         const cleanLatexString = (str: string) => {
             if (!str) return '';
             let s = str;
+            // 1. Remove standard formatting commands with backslash
             // Recursively remove common formatting commands: \textit{word} -> word, \textbf{word} -> word
-            // We loop a few times to handle basic nesting
             for(let i=0; i<3; i++) {
                 s = s.replace(/\\(textit|textbf|emph|textsc|textsf|text|underline)\{([^}]+)\}/g, '$2');
             }
-            // Remove escaped characters: \& -> &, \% -> %, \$ -> $
+            
+            // 2. Extra Robustness: Remove formatting commands WITHOUT backslash
+            // This handles cases where '\' might have been stripped prematurely or input was malformed (e.g. textit{Word})
+            s = s.replace(/(textit|textbf|emph|textsc|textsf|text|underline)\{([^}]+)\}/g, '$2');
+
+            // 3. Remove escaped characters: \& -> &, \% -> %, \$ -> $
             s = s.replace(/\\([&%$#_{}])/g, '$1');
-            // Remove remaining braces if they are just grouping { }
+
+            // 4. Remove remaining braces if they are just grouping { }
             s = s.replace(/\{([^}]+)\}/g, '$1');
-            // Finally remove remaining backslashes (like in \'e -> 'e)
+
+            // 5. Finally remove remaining backslashes (like in \'e -> 'e)
             s = s.replace(/\\/g, ''); 
+            
             return s.trim();
         };
 
