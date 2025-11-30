@@ -1,5 +1,6 @@
 
 
+
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Language, AnalysisResult, PaperSource, StyleGuide, SemanticScholarPaper, PersonalData } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES, SEMANTIC_SCHOLAR_API_BASE_URL } from '../constants';
@@ -88,9 +89,20 @@ function getAiClient(): GoogleGenAI {
     return new GoogleGenAI({ apiKey });
 }
 
-// Helper to identify errors that should trigger a key rotation (Quota, Rate Limit, Suspension)
+// Helper to safely extract error message even from non-Error objects
+function getErrorMessage(error: any): string {
+    if (error instanceof Error) return error.message.toLowerCase();
+    if (typeof error === 'string') return error.toLowerCase();
+    try {
+        return JSON.stringify(error).toLowerCase();
+    } catch {
+        return String(error).toLowerCase();
+    }
+}
+
+// Helper to identify errors that should trigger a key rotation (Quota, Rate Limit, Suspension, Invalid Key)
 function isRotationTrigger(error: any): boolean {
-    const errorMessage = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+    const errorMessage = getErrorMessage(error);
     return (
         errorMessage.includes('429') || 
         errorMessage.includes('quota') || 
@@ -99,7 +111,12 @@ function isRotationTrigger(error: any): boolean {
         errorMessage.includes('403') || 
         errorMessage.includes('permission denied') ||
         errorMessage.includes('suspended') ||
-        errorMessage.includes('consumer') // often appears in suspension messages
+        errorMessage.includes('consumer') ||
+        // Check for Invalid Key (400) errors to avoid getting stuck on a bad key
+        errorMessage.includes('api key') ||
+        errorMessage.includes('api_key') ||
+        // Sometimes valid key errors come as generic 400s with specific details in the body
+        (errorMessage.includes('400') && (errorMessage.includes('invalid') || errorMessage.includes('not found')))
     );
 }
 
@@ -125,21 +142,26 @@ async function executeWithKeyRotation<T>(
             const client = getAiClient();
             return await withRateLimitHandling(() => operation(client));
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
+            const errorMessage = getErrorMessage(error);
             
             // Check if error is related to quota or exhaustion
             const shouldRotate = isRotationTrigger(error);
 
             // If it's a quota/auth error and we have more keys, rotate and continue loop
             if (shouldRotate && KeyManager.keys.length > 1) {
-                console.warn(`⚠️ API Key (Index ${KeyManager.currentIndex}) exhausted or suspended. Attempting to rotate... Error: ${errorMessage}`);
+                console.warn(`⚠️ API Key (Index ${KeyManager.currentIndex}) exhausted/invalid. Rotating... Error: ${errorMessage}`);
                 KeyManager.rotate();
                 
-                // Add a SIGNIFICANT safety delay during rotation.
-                // Google tracks RPM (requests per minute) across keys from the same IP often.
-                // Hammering rotate too fast can suspend the next key immediately.
-                console.log("Waiting 10 seconds before trying next key to clear IP rate limits...");
-                await delay(10000); 
+                // Dynamic Delay: 
+                // If it's just a bad key (400), rotate fast (1s).
+                // If it's a suspension/quota (429/403), wait (60s) as requested to clear limits.
+                if (errorMessage.includes('400') || errorMessage.includes('not found') || errorMessage.includes('invalid') || errorMessage.includes('api_key_invalid')) {
+                     console.log("Invalid key detected, rotating immediately...");
+                     await delay(1000);
+                } else {
+                     console.log("Quota/Suspension detected, waiting 60s before next key...");
+                     await delay(60000); // 60 seconds wait
+                }
                 
                 continue; 
             }
@@ -149,7 +171,7 @@ async function executeWithKeyRotation<T>(
             if (attempt === maxAttempts - 1) {
                 // If this was the last key, we modify the error message to ensure App.tsx detects it as exhaustion
                 if (shouldRotate) {
-                    throw new Error(`All Gemini API Keys exhausted (Quota/Suspended). Last error: ${errorMessage}`);
+                    throw new Error(`All Gemini API Keys exhausted (Quota/Suspended/Invalid). Last error: ${errorMessage}`);
                 }
                 throw error;
             }
@@ -168,7 +190,7 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
         try {
             return await apiCall(); // Success!
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
+            const errorMessage = getErrorMessage(error);
             
             // Hard failure for model non-existence or strict 0 quota
             if (errorMessage.includes('limit: 0') || errorMessage.includes('quota exceeded for metric')) {
@@ -178,10 +200,15 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
             const shouldRotate = isRotationTrigger(error);
             const hasBackupKeys = KeyManager.keys.length > 1;
 
-            // OPTIMIZATION: If we hit a quota/auth limit and have other keys available, 
+            // OPTIMIZATION: If we hit a quota/auth/key limit and have other keys available, 
             // throw immediately so `executeWithKeyRotation` can switch to the next key.
             // Do NOT waste time retrying on a dead key if we have backups.
             if (shouldRotate && hasBackupKeys) {
+                throw error;
+            }
+
+            // Don't retry on 400 Bad Request unless it's strictly transient or a rotation trigger we couldn't handle
+            if ((errorMessage.includes('400') || errorMessage.includes('invalid_argument')) && !shouldRotate) {
                 throw error;
             }
 
@@ -199,7 +226,6 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
             let backoffTime;
             if (shouldRotate) {
                 // If we are here, we have only 1 key (or no backups loaded) and hit 429/403. We must wait.
-                // Note: Waiting on 403 Suspended won't help, but logic dictates we try if no backups.
                 // UPDATED: Increased backoff time significantly to prevent suspension cascades.
                 backoffTime = 8000 + Math.random() * 4000;
             } else {
