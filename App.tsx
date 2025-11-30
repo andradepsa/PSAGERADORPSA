@@ -702,11 +702,33 @@ const App: React.FC = () => {
     }
     
     const extractMetadata = (code: string, returnData = false) => {
-        const titleMatch = code.match(/\\title\{([^}]+)\}/);
-        const title = titleMatch ? titleMatch[1].replace(/\\/g, '') : 'Untitled Paper';
+        // Use greedy matching (.*) to capture title even if it contains nested braces on the same line.
+        const titleMatch = code.match(/\\title\{(.*)\}/);
+        
+        // Robust cleaning function for LaTeX strings
+        const cleanLatexString = (str: string) => {
+            if (!str) return '';
+            let s = str;
+            // Recursively remove common formatting commands: \textit{word} -> word, \textbf{word} -> word
+            // We loop a few times to handle basic nesting
+            for(let i=0; i<3; i++) {
+                s = s.replace(/\\(textit|textbf|emph|textsc|textsf|text|underline)\{([^}]+)\}/g, '$2');
+            }
+            // Remove escaped characters: \& -> &, \% -> %, \$ -> $
+            s = s.replace(/\\([&%$#_{}])/g, '$1');
+            // Remove remaining braces if they are just grouping { }
+            s = s.replace(/\{([^}]+)\}/g, '$1');
+            // Finally remove remaining backslashes (like in \'e -> 'e)
+            s = s.replace(/\\/g, ''); 
+            return s.trim();
+        };
+
+        const title = titleMatch ? cleanLatexString(titleMatch[1]) : 'Untitled Paper';
         
         const abstractMatch = code.match(/\\begin\{abstract\}([\s\S]*?)\\end\{abstract\}/);
-        const abstractText = abstractMatch ? abstractMatch[1].trim().replace(/\\noindent\s*/g, '').replace(/\\/g, '') : '';
+        let abstractText = abstractMatch ? abstractMatch[1] : '';
+        abstractText = abstractText.replace(/\\noindent\s*/g, '');
+        abstractText = cleanLatexString(abstractText);
         
         // Use dynamic author details for metadata extraction
         // The `authors` state already holds the necessary ZenodoAuthor[] structure
