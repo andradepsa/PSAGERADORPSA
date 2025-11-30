@@ -16,22 +16,26 @@ interface ModelSelectorProps {
 const ModelSelector: React.FC<ModelSelectorProps> = ({ models, selectedModel, onSelect, label }) => {
     return (
         <div className="my-6">
-            <label className="block text-lg font-semibold text-gray-700 mb-3 text-center sm:text-left">{label}</label>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                {models.map((model) => (
-                    <button
-                        key={model.name}
-                        onClick={() => onSelect(model.name)}
-                        className={`flex-1 text-left p-4 rounded-lg border-2 transition-all duration-300 transform hover:-translate-y-1 hover:shadow-lg ${
-                            selectedModel === model.name
-                                ? 'bg-indigo-100 border-indigo-600 ring-2 ring-indigo-500 shadow-lg'
-                                : 'bg-white text-gray-700 border-gray-300 hover:border-indigo-500'
-                        }`}
-                    >
-                        <span className="font-bold block text-indigo-800">{model.name}</span>
-                        <span className={`text-sm font-normal ${selectedModel === model.name ? 'text-indigo-700' : 'text-gray-600'}`}>{model.description}</span>
-                    </button>
-                ))}
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                {label}
+            </label>
+            <div className="relative">
+                <select
+                    value={selectedModel}
+                    onChange={(e) => onSelect(e.target.value)}
+                    className="block w-full appearance-none bg-white border border-gray-300 text-gray-900 text-base rounded-lg focus:ring-indigo-500 focus:border-indigo-500 p-3 pr-10 shadow-sm transition-all hover:border-indigo-400 cursor-pointer"
+                >
+                    {models.map((model) => (
+                        <option key={model.name} value={model.name}>
+                            {model.name} — {model.description}
+                        </option>
+                    ))}
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                    <svg className="h-5 w-5 fill-current" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                        <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z" />
+                    </svg>
+                </div>
             </div>
         </div>
     );

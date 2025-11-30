@@ -1,7 +1,10 @@
+
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Language, AnalysisResult, PaperSource, StyleGuide, SemanticScholarPaper, PersonalData } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES, SEMANTIC_SCHOLAR_API_BASE_URL } from '../constants';
 import { ARTICLE_TEMPLATE } from './articleTemplate'; // Import the single article template
+
+declare const puter: any;
 
 const BABEL_LANG_MAP: Record<Language, string> = {
     en: 'english',
@@ -162,6 +165,54 @@ async function callModel(
         };
 
         return withRateLimitHandling(apiCall);
+        
+    } else if (model.startsWith('puter-')) {
+        // Puter AI Integration
+        if (typeof puter === 'undefined') {
+            throw new Error("Puter.js library not loaded. Please ensure you are running this in a compatible environment or refresh the page.");
+        }
+
+        const puterModelName = model.replace('puter-', '');
+
+        const apiCall = async () => {
+            // Puter.ai.chat(message, options?)
+            // We combine system and user prompt because Puter.ai.chat usually takes a string or simple options
+            // but recent versions support chat history array. We'll try the message object structure first if supported,
+            // or just prepend system instruction if the API expects a single string.
+            // Documentation implies puter.ai.chat(prompt, { model: '...' })
+            
+            const combinedPrompt = `${systemInstruction}\n\n---\n\n${userPrompt}`;
+
+            const response = await puter.ai.chat(combinedPrompt, { model: puterModelName });
+            
+            // Puter usually returns the response string directly or an object.
+            let text = '';
+            if (typeof response === 'string') {
+                text = response;
+            } else if (response && response.message && response.message.content) {
+                text = response.message.content;
+            } else {
+                text = JSON.stringify(response);
+            }
+
+            const reconstructedResponse = {
+                candidates: [{
+                    content: { parts: [{ text: text }], role: 'model' },
+                    finishReason: 'STOP',
+                    index: 0,
+                    safetyRatings: [],
+                    groundingMetadata: { groundingChunks: [] }
+                }],
+                functionCalls: [],
+                get text() {
+                    return this.candidates?.[0]?.content?.parts?.map(p => p.text).join('') || '';
+                }
+            };
+            return reconstructedResponse as GenerateContentResponse;
+        };
+
+        return withRateLimitHandling(apiCall);
+
     } else {
         throw new Error(`Unsupported model: ${model}`);
     }
