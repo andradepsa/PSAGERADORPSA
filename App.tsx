@@ -344,6 +344,7 @@ const App: React.FC = () => {
         const storedToken = localStorage.getItem('zenodo_api_key');
         if (!storedToken) {
             alert('❌ Token Zenodo não encontrado! Por favor, configure-o nas definições (ícone de engrenagem) antes de iniciar.');
+            setIsContinuousMode(false); // Stop loop if missing config
             return;
         }
         setZenodoToken(storedToken);
@@ -353,6 +354,7 @@ const App: React.FC = () => {
         if (authors.length === 0 || !hasValidAuthor) {
             alert('❌ Dados pessoais do autor (Nome, Afiliação, ORCID) não encontrados ou incompletos! Por favor, configure-os no ícone de "pessoa" antes de iniciar.');
             setIsPersonalDataModalOpen(true);
+            setIsContinuousMode(false); // Stop loop if missing config
             return;
         }
 
@@ -500,11 +502,20 @@ const App: React.FC = () => {
             // Log the failure
             setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: 'upload_failed', latexCode: currentPaper, errorMessage: errorMessage }]);
             
-            // If it's a critical error (Quota), we stop everything
-            if (errorMessage.toLowerCase().includes('quota') || errorMessage.toLowerCase().includes('429')) {
-                 setGenerationStatus(`🛑 Limite de cota atingido. Automação parada.`);
+            const isAuthError = errorMessage.includes('401') || errorMessage.includes('403') || errorMessage.includes('AUTENTICAÇÃO') || errorMessage.includes('forbidden');
+
+            // If it's a critical error (Quota or Auth), we stop everything
+            if (errorMessage.toLowerCase().includes('quota') || errorMessage.toLowerCase().includes('429') || isAuthError) {
+                 setGenerationStatus(`🛑 ${isAuthError ? 'Erro FATAL de Autenticação (Verifique sua API Key)' : 'Limite de cota atingido'}. Automação parada.`);
                  setIsGenerating(false);
                  isGenerationCancelled.current = true;
+                 
+                 // STOP THE LOOP AUTOMATICALLY
+                 if (isContinuousMode) {
+                     setIsContinuousMode(false);
+                     localStorage.setItem('isContinuousMode', 'false');
+                 }
+
             } else if (isContinuousMode && !isGenerationCancelled.current) {
                  // If it's a non-critical error and we are in continuous mode, we wait and try the next one
                  setGenerationStatus(`❌ Erro: ${errorMessage}. Tentando próximo artigo em 60s...`);

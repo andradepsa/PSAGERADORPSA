@@ -36,9 +36,18 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
             
-            // Hard failure for model non-existence or strict 0 quota
-            if (errorMessage.includes('limit: 0') || errorMessage.includes('quota exceeded for metric')) {
-                 throw new Error(`API Quota Exceeded (Limit: 0) or Model Unavailable: ${errorMessage}`);
+            // CRITICAL: Stop immediately for Auth errors or hard limits. Do not retry.
+            if (
+                errorMessage.includes('limit: 0') || 
+                errorMessage.includes('quota exceeded for metric') ||
+                errorMessage.includes('autenticação') ||
+                errorMessage.includes('401') ||
+                errorMessage.includes('403') ||
+                errorMessage.includes('forbidden') || // Catch generic forbidden errors
+                errorMessage.includes('unauthorized')
+            ) {
+                 console.error("🛑 Critical API Error detected. Stopping retries.", errorMessage);
+                 throw error; // Re-throw immediately, skipping retries
             }
 
             // If it's the last attempt, propagate error
@@ -121,8 +130,16 @@ async function callModel(
             });
 
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(`x.ai API Error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`);
+                const errorData = await response.json().catch(() => ({}));
+                const msg = errorData.error?.message || 'Unknown error';
+                
+                // Explicitly check for Auth errors to stop retries
+                if (response.status === 401 || response.status === 403) {
+                     // Ensure 403 is part of the error message for the catcher to see
+                     throw new Error(`ERRO FATAL DE AUTENTICAÇÃO (Status ${response.status}): ${msg}. Verifique sua API Key.`);
+                }
+                
+                throw new Error(`x.ai API Error: ${response.status} - ${msg}`);
             }
 
             const data = await response.json();
