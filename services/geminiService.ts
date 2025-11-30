@@ -498,6 +498,20 @@ ${templateWithBabelAndAuthor}
     return { paper: postProcessLatex(paper), sources };
 }
 
+// Robust JSON cleaner to handle AI hallucinations
+function cleanJsonOutput(text: string): string {
+    let cleaned = text.trim();
+    // Remove markdown code blocks
+    cleaned = cleaned.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '');
+    
+    // Check for repetition loops like "\nobreak\nobreak"
+    if (cleaned.includes("nobreak\nobreak") || cleaned.includes("nobreaknobreak")) {
+        throw new Error("Model output contained a repetition loop (nobreak).");
+    }
+    
+    return cleaned.trim();
+}
+
 export async function analyzePaper(paperContent: string, pageCount: number, model: string): Promise<AnalysisResult> {
     const analysisTopicsList = ANALYSIS_TOPICS.map(t => `- Topic ${t.num} (${t.name}): ${t.desc}`).join('\n');
     const systemInstruction = `You are an expert academic reviewer AI. Your task is to perform a rigorous, objective, and multi-faceted analysis of a provided scientific paper written in LaTeX.
@@ -513,6 +527,7 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
     **Output Format:**
     -   You MUST return your analysis as a single, valid JSON object.
     -   Do NOT include any text, explanations, or markdown formatting (like \`\`\`json) outside of the JSON object.
+    -   **Do NOT output LaTeX commands (like \\nobreak, \\newline) inside the JSON values.**
     -   The JSON object must have a single key "analysis" which is an array of objects.
     -   Each object in the array must have three keys:
         1.  "topicNum": The numeric identifier of the topic being analyzed (number).
@@ -560,28 +575,42 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
         required: ["analysis"],
     };
 
-    const response = await callModel(model, systemInstruction, paperContent, {
-        jsonOutput: true,
-        responseSchema: responseSchema
-    });
+    // Retry logic for JSON parsing failures
+    const MAX_PARSE_RETRIES = 3;
     
-    if (!response.candidates || response.candidates.length === 0) {
-        throw new Error("AI returned no candidates for analysis.");
-    }
+    for (let attempt = 1; attempt <= MAX_PARSE_RETRIES; attempt++) {
+        try {
+            const response = await callModel(model, systemInstruction, paperContent, {
+                jsonOutput: true,
+                responseSchema: responseSchema
+            });
 
-    // Safety check
-    if (!response.text) {
-        throw new Error("AI returned an empty response for the analysis.");
-    }
+            if (!response.candidates || response.candidates.length === 0) {
+                 throw new Error("AI returned no candidates for analysis.");
+            }
 
-    try {
-        const jsonText = response.text.trim().replace(/^```json\s*|```\s*$/g, '');
-        const result = JSON.parse(jsonText);
-        return result as AnalysisResult;
-    } catch (error) {
-        console.error("Failed to parse analysis JSON:", response.text);
-        throw new Error("The analysis returned an invalid format. Please try again.");
+            if (!response.text) {
+                throw new Error("AI returned an empty response for the analysis.");
+            }
+
+            const jsonText = cleanJsonOutput(response.text);
+            const result = JSON.parse(jsonText);
+            return result as AnalysisResult;
+
+        } catch (error) {
+            console.warn(`Attempt ${attempt} to analyze paper failed (JSON Parse/Validation):`, error);
+            
+            // If it's the last attempt, fail loudly so the automation can handle it (or skip to next)
+            if (attempt === MAX_PARSE_RETRIES) {
+                throw new Error(`The analysis returned an invalid format after ${MAX_PARSE_RETRIES} attempts. Last error: ${error instanceof Error ? error.message : String(error)}`);
+            }
+            
+            // Short delay before retry to let potential hiccups settle
+            await delay(2000);
+        }
     }
+    
+    throw new Error("Unexpected error in analysis loop.");
 }
 
 
