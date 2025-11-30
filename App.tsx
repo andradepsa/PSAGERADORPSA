@@ -291,7 +291,7 @@ const App: React.FC = () => {
         }
         
         if (lastError) {
-            onStatusUpdate(`⚠️ Compilação falhou. Tentando corrigir o código com IA...`);
+            onStatusUpdate(`⚠️ Compilação falhou. Tentando corrigir o código com IA (Modelo: ${analysisModel})...`);
             console.log("Initiating AI Fix...");
             console.log("Error Reason (Full Log sent to AI):", lastError.message);
             
@@ -376,7 +376,7 @@ const App: React.FC = () => {
                 setGeneratedTitle('');
                 setFinalLatexCode('');
 
-                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando um título inovador para ${selectedDiscipline}...`);
+                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando um título inovador para ${selectedDiscipline} (Modelo: ${analysisModel})...`);
                 setGenerationProgress(5);
                 // Use getRandomTopic with selectedDiscipline
                 const randomTopic = getRandomTopic(selectedDiscipline);
@@ -384,7 +384,7 @@ const App: React.FC = () => {
                 temporaryTitle = await generatePaperTitle(randomTopic, language, analysisModel, selectedDiscipline);
                 setGeneratedTitle(temporaryTitle);
 
-                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando a primeira versão...`);
+                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando a primeira versão (Modelo: ${generationModel})...`);
                 setGenerationProgress(15);
                 const { paper: initialPaper, sources } = await generateInitialPaper(
                     temporaryTitle, 
@@ -399,13 +399,13 @@ const App: React.FC = () => {
                 for (let iter = 1; iter <= TOTAL_ITERATIONS; iter++) {
                     if (isGenerationCancelled.current) throw new Error("Operação cancelada pelo usuário.");
                     setGenerationProgress(15 + (iter / TOTAL_ITERATIONS) * 75);
-                    setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Analisando (iteração ${iter}/${TOTAL_ITERATIONS})...`);
+                    setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Analisando (iteração ${iter}/${TOTAL_ITERATIONS}) (Modelo: ${analysisModel})...`);
                     const analysisResult = await analyzePaper(currentPaper, pageCount, analysisModel);
                     const validAnalysisItems = analysisResult.analysis.filter(res => ANALYSIS_TOPICS.some(topic => topic.num === res.topicNum));
                     setAnalysisResults(prev => [...prev, { iteration: iter, results: validAnalysisItems.map(res => ({ topic: ANALYSIS_TOPICS.find(t => t.num === res.topicNum)!, score: res.score, scoreClass: getScoreClass(res.score), improvement: res.improvement })) }]);
                     if (!validAnalysisItems.some(res => res.score < 7.0)) break;
                     if (iter < TOTAL_ITERATIONS) {
-                        setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Refinando com base no feedback ${iter}...`);
+                        setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Refinando com base no feedback ${iter}... (Modelo: ${generationModel})`);
                         currentPaper = await improvePaper(currentPaper, { analysis: validAnalysisItems }, language, generationModel);
                     }
                 }
@@ -726,7 +726,7 @@ const App: React.FC = () => {
             s = s.replace(/\\([&%$#_{}])/g, '$1');
 
             // 4. Remove remaining braces if they are just grouping { }
-            s = s.replace(/\{([^}]+)\}/g, '$1');
+            s = s.replace(/\\{([^}]+)\\}/g, '$1'); // Fixed Regex for brace removal
 
             // 5. Finally remove remaining backslashes (like in \'e -> 'e)
             s = s.replace(/\\/g, ''); 

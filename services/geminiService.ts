@@ -226,6 +226,8 @@ async function callModel(
         googleSearch?: boolean;
     } = {}
 ): Promise<GenerateContentResponse> {
+    console.log(`[Gemini Service] Calling model: ${model}`); // LOG FOR VERIFICATION
+
     if (model.startsWith('gemini-')) {
         // Wrap the generation logic in the rotation handler
         return executeWithKeyRotation(async (aiClient) => {
