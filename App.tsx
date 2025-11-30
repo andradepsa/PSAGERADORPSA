@@ -1,5 +1,3 @@
-
-
 import React, { useState, useEffect, useRef } from 'react';
 import { generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide } from './services/geminiService';
 import type { Language, IterationAnalysis, PaperSource, AnalysisResult, StyleGuide, ArticleEntry, PersonalData } from './types';
@@ -340,7 +338,9 @@ const App: React.FC = () => {
     };
 
     const handleFullAutomation = async (batchSizeOverride?: number) => {
-        const articlesToProcess = batchSizeOverride ?? (isContinuousMode ? 7 : numberOfArticles);
+        // Important: In Continuous Mode, we default to a batch size of 1 to allow for cooldowns between papers.
+        // This prevents the "Quota Exhausted" error caused by processing 7 papers (1.5M tokens) simultaneously.
+        const articlesToProcess = batchSizeOverride ?? (isContinuousMode ? 1 : numberOfArticles);
         const storedToken = localStorage.getItem('zenodo_api_key');
         if (!storedToken) {
             alert('❌ Token Zenodo não encontrado! Por favor, configure-o nas definições (ícone de engrenagem) antes de iniciar.');
@@ -521,13 +521,14 @@ const App: React.FC = () => {
                 return "❌ Automação cancelada pelo usuário."; // Default manual cancellation message
             });
         } else if (isContinuousMode) {
-            setGenerationStatus(`✅ Lote de ${articlesToProcess} artigos concluído. Iniciando próximo lote...`);
+            setGenerationStatus(`✅ Artigo concluído. Pausa estratégica de 30s para recuperar cota da API...`);
             setTimeout(() => {
                 // Double-check flags before re-starting
                 if (isContinuousMode && !isGenerationCancelled.current) {
-                    handleFullAutomation(7);
+                    // Start next cycle with just 1 article to keep cooldowns active
+                    handleFullAutomation(1);
                 }
-            }, 5000);
+            }, 30000); // 30 seconds wait
         } else {
             // This is for a normal, single batch completion
             setGenerationProgress(100);
@@ -1019,7 +1020,7 @@ const App: React.FC = () => {
                                 <div>
                                     <h4 className="font-semibold text-center mb-2 text-gray-700">Automação Contínua (Loop)</h4>
                                     <div className="flex items-center justify-center gap-2"><span className={`font-semibold transition-colors ${!isContinuousMode ? 'text-indigo-600' : 'text-gray-500'}`}>Off</span><label htmlFor="continuousToggle" className="relative inline-flex items-center cursor-pointer"><input type="checkbox" checked={isContinuousMode} onChange={handleToggleContinuousMode} id="continuousToggle" className="sr-only peer" /><div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div></label><span className={`font-semibold transition-colors ${isContinuousMode ? 'text-indigo-600' : 'text-gray-500'}`}>On</span></div>
-                                    <p className="text-center text-xs text-gray-500 mt-1">Gera lotes de 7 artigos sem parar.</p>
+                                    <p className="text-center text-xs text-gray-500 mt-1">Gera artigos continuamente com pausas.</p>
                                 </div>
                                  <div>
                                     <h4 className="font-semibold text-center mb-2 text-gray-700">Agendamento Automático</h4>
