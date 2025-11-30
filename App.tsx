@@ -1,5 +1,3 @@
-
-
 import React, { useState, useEffect, useRef } from 'react';
 import { generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide } from './services/geminiService';
 import type { Language, IterationAnalysis, PaperSource, AnalysisResult, StyleGuide, ArticleEntry, PersonalData } from './types';
@@ -949,12 +947,10 @@ const App: React.FC = () => {
                 isOpen={isApiModalOpen} 
                 onClose={() => setIsApiModalOpen(false)} 
                 onSave={(keys) => { 
-                    // Save Gemini Keys (Array)
-                    localStorage.setItem('gemini_api_keys', JSON.stringify(keys.gemini));
-                    // Save the first key as default for backward compatibility or simple usage
-                    if (keys.gemini.length > 0) {
-                        localStorage.setItem('gemini_api_key', keys.gemini[0]);
-                    }
+                    // Save Gemini Key (Single)
+                    localStorage.setItem('gemini_api_key', keys.gemini);
+                    // Remove multi-key support to avoid confusion
+                    localStorage.removeItem('gemini_api_keys');
 
                     if (keys.zenodo) setZenodoToken(keys.zenodo); 
                     if (keys.xai) localStorage.setItem('xai_api_key', keys.xai); 

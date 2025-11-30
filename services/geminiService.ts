@@ -1,5 +1,3 @@
-
-
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Language, AnalysisResult, PaperSource, StyleGuide, SemanticScholarPaper, PersonalData } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES, SEMANTIC_SCHOLAR_API_BASE_URL } from '../constants';
@@ -12,71 +10,14 @@ const BABEL_LANG_MAP: Record<Language, string> = {
     fr: 'french',
 };
 
-// Internal Key Manager to track rotation state
+// Internal Key Manager
 const KeyManager = {
-    keys: [] as string[],
-    currentIndex: 0,
-    initialized: false,
-
-    loadKeys: function() {
-        const storedKeys = localStorage.getItem('gemini_api_keys');
-        const legacyKey = localStorage.getItem('gemini_api_key') || (process.env.API_KEY as string);
-        
-        let newKeys: string[] = [];
-
-        if (storedKeys) {
-            try {
-                const parsed = JSON.parse(storedKeys);
-                newKeys = Array.isArray(parsed) ? parsed.filter(k => k.trim() !== '') : [];
-            } catch {
-                newKeys = [];
-            }
-        }
-        
-        if (newKeys.length === 0 && legacyKey) {
-            newKeys = [legacyKey];
-        }
-
-        // Always check environment variable if keys list is still empty
-        if (newKeys.length === 0 && process.env.API_KEY) {
-             newKeys = [process.env.API_KEY];
-        }
-
-        this.keys = newKeys;
-
-        // STRATEGY FOR MULTI-WINDOW SUPPORT:
-        // If this is the first time loading in this window session,
-        // pick a RANDOM starting index instead of 0. 
-        // This ensures that if 10 tabs are opened, they statistically distribute 
-        // themselves across the available keys rather than all hitting Key #1 simultaneously.
-        if (!this.initialized && this.keys.length > 0) {
-            this.currentIndex = Math.floor(Math.random() * this.keys.length);
-            console.log(`[KeyManager] Window initialized. Randomly selected starting API Key Index: ${this.currentIndex + 1}/${this.keys.length}`);
-            this.initialized = true;
-        } else if (this.keys.length > 0) {
-            // Ensure index is within bounds if keys were removed externally via settings
-            if (this.currentIndex >= this.keys.length) {
-                this.currentIndex = 0;
-            }
-        }
-    },
-
     getCurrentKey: function(): string {
-        // We load keys to ensure we have the latest list, but we rely on the random index set during initialization
-        this.loadKeys(); 
-        if (this.keys.length === 0) {
+        const key = localStorage.getItem('gemini_api_key') || (process.env.API_KEY as string);
+        if (!key) {
             throw new Error("Gemini API key not found. Please add keys in the settings modal (gear icon).");
         }
-        return this.keys[this.currentIndex];
-    },
-
-    rotate: function(): boolean {
-        if (this.keys.length <= 1) return false;
-        
-        const prevIndex = this.currentIndex;
-        this.currentIndex = (this.currentIndex + 1) % this.keys.length;
-        console.warn(`🔄 Rotating API Key: Switching from index ${prevIndex} to ${this.currentIndex}`);
-        return true;
+        return key;
     }
 };
 
@@ -86,94 +27,6 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 function getAiClient(): GoogleGenAI {
     const apiKey = KeyManager.getCurrentKey();
     return new GoogleGenAI({ apiKey });
-}
-
-// Helper to identify errors that should trigger a key rotation (Quota, Rate Limit, Suspension, Invalid Key)
-function isRotationTrigger(error: any): boolean {
-    const errorMessage = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-    return (
-        errorMessage.includes('429') || 
-        errorMessage.includes('quota') || 
-        errorMessage.includes('limit') || 
-        errorMessage.includes('exhausted') ||
-        errorMessage.includes('403') || 
-        errorMessage.includes('permission denied') ||
-        errorMessage.includes('suspended') ||
-        errorMessage.includes('consumer') ||
-        // 400 Errors usually indicate invalid keys or bad requests. 
-        // We treat them as rotation triggers to skip bad keys in the list.
-        errorMessage.includes('400') ||
-        errorMessage.includes('key not found') ||
-        errorMessage.includes('api key') ||
-        errorMessage.includes('invalid argument') 
-    );
-}
-
-// Executes an AI model call with automatic key rotation on Quota/429/400 errors
-async function executeWithKeyRotation<T>(
-    operation: (client: GoogleGenAI) => Promise<T>, 
-    modelName: string
-): Promise<T> {
-    
-    // Ensure keys are loaded. 
-    // Note: loadKeys() will maintain the current randomized index for this window unless the list changed drastically.
-    KeyManager.loadKeys(); 
-
-    // We allow trying each key once before giving up entirely on this specific request.
-    const maxAttempts = KeyManager.keys.length > 0 ? KeyManager.keys.length : 1;
-    
-    // However, if we only have 1 key, we still want to retry transient errors a few times.
-    // The inner retry logic inside `withRateLimitHandling` handles transient 500s/429s.
-    // This outer loop handles "Hard Quota", "Suspension", or "Invalid Key" by switching keys.
-    
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        try {
-            const client = getAiClient();
-            return await withRateLimitHandling(() => operation(client));
-        } catch (error) {
-            const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
-            
-            // Check if error is related to quota, exhaustion, or invalid key
-            const shouldRotate = isRotationTrigger(error);
-
-            // If it's a rotation trigger and we have more keys, rotate and continue loop
-            if (shouldRotate && KeyManager.keys.length > 1) {
-                console.warn(`⚠️ API Key (Index ${KeyManager.currentIndex}) failed. Attempting to rotate... Error: ${errorMessage}`);
-                KeyManager.rotate();
-                
-                // DYNAMIC DELAY LOGIC:
-                // If it's a 400/Invalid Key error, skip quickly (1s).
-                // If it's a Quota/Suspension error, wait longer (60s) to clear rate limits or cool down.
-                if (
-                    errorMessage.includes('400') || 
-                    errorMessage.includes('key not found') || 
-                    errorMessage.includes('invalid')
-                ) {
-                    console.log("Invalid Key detected. Skipping fast (1s)...");
-                    await delay(1000); 
-                } else {
-                    console.log("Quota exhaustion or Suspension detected. Waiting 60 seconds before trying next key to clear IP rate limits...");
-                    await delay(60000); // 1 minute safety pause
-                }
-                
-                continue; 
-            }
-
-            // If it's not a rotation error, or we ran out of keys, throw the error up
-            // Note: If we are on the last key and it fails, the loop ends and we throw.
-            if (attempt === maxAttempts - 1) {
-                // If this was the last key, we modify the error message to ensure App.tsx detects it as exhaustion
-                if (shouldRotate) {
-                    throw new Error(`All Gemini API Keys exhausted or invalid. Last error: ${errorMessage}`);
-                }
-                throw error;
-            }
-            
-            throw error; // Non-rotation errors shouldn't rotate keys usually.
-        }
-    }
-    
-    throw new Error("All Gemini API Keys exhausted (Rotation loop ended without success).");
 }
 
 async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
@@ -190,43 +43,29 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
                  throw new Error(`API Quota Exceeded (Limit: 0) or Model Unavailable: ${errorMessage}`);
             }
 
-            const shouldRotate = isRotationTrigger(error);
-            const hasBackupKeys = KeyManager.keys.length > 1;
-
-            // OPTIMIZATION: If we hit a rotation trigger (Quota/Auth/Invalid) and have other keys available, 
-            // throw immediately so `executeWithKeyRotation` can switch to the next key.
-            // Do NOT waste time retrying on a dead key if we have backups.
-            if (shouldRotate && hasBackupKeys) {
-                throw error;
-            }
-
-            // If it's the last attempt, propagate error so rotation logic can catch it (if applicable) or fail
+            // If it's the last attempt, propagate error
             if (attempt === MAX_RETRIES) {
-                if (shouldRotate) {
-                    throw new Error(`Quota Exceeded or Key Suspended: ${errorMessage}`);
-                 }
-                 if (errorMessage.includes('503') || errorMessage.includes('overloaded')) {
+                if (errorMessage.includes('503') || errorMessage.includes('overloaded')) {
                     throw new Error("The AI model is temporarily overloaded. Please try again in a few moments.");
                  }
                 throw error;
             }
 
-            let backoffTime;
-            if (shouldRotate) {
-                // If we are here, we have only 1 key (or no backups loaded) and hit 429/403/400. We must wait.
-                // UPDATED: Increased backoff time significantly to prevent suspension cascades.
-                backoffTime = 8000 + Math.random() * 4000;
-            } else {
-                // Transient error (503, etc). Exponential backoff.
-                console.log("Transient error detected. Using exponential backoff...");
-                backoffTime = Math.pow(2, attempt) * 1000 + Math.random() * 500;
-            }
-            
-            console.log(`Waiting for ${backoffTime.toFixed(0)}ms before retrying on same key...`);
+            // Exponential backoff
+            const backoffTime = Math.pow(2, attempt) * 1000 + Math.random() * 500;
+            console.log(`Waiting for ${backoffTime.toFixed(0)}ms before retrying...`);
             await delay(backoffTime);
         }
     }
     throw new Error("API call failed after internal retries.");
+}
+
+// Helper to execute with retry (renamed from rotation)
+async function executeWithRetry<T>(
+    operation: (client: GoogleGenAI) => Promise<T>
+): Promise<T> {
+    const client = getAiClient();
+    return await withRateLimitHandling(() => operation(client));
 }
 
 // Central dispatcher for different AI models
@@ -243,8 +82,7 @@ async function callModel(
     console.log(`[Gemini Service] Calling model: ${model}`); // LOG FOR VERIFICATION
 
     if (model.startsWith('gemini-')) {
-        // Wrap the generation logic in the rotation handler
-        return executeWithKeyRotation(async (aiClient) => {
+        return executeWithRetry(async (aiClient) => {
             return aiClient.models.generateContent({
                 model: model,
                 contents: userPrompt,
@@ -255,7 +93,7 @@ async function callModel(
                     ...(config.googleSearch && { tools: [{ googleSearch: {} }] }),
                 },
             });
-        }, model);
+        });
 
     } else if (model.startsWith('grok-')) {
         // Grok logic remains unchanged (single key support)
