@@ -949,7 +949,7 @@ const App: React.FC = () => {
                 onSave={(keys) => { 
                     // Save Gemini Key (Single)
                     localStorage.setItem('gemini_api_key', keys.gemini);
-                    // Remove multi-key support to avoid confusion
+                    // Remove multi-key support
                     localStorage.removeItem('gemini_api_keys');
 
                     if (keys.zenodo) setZenodoToken(keys.zenodo); 

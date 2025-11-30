@@ -10,22 +10,20 @@ const BABEL_LANG_MAP: Record<Language, string> = {
     fr: 'french',
 };
 
-// Internal Key Manager
-const KeyManager = {
-    getCurrentKey: function(): string {
-        const key = localStorage.getItem('gemini_api_key') || (process.env.API_KEY as string);
-        if (!key) {
-            throw new Error("Gemini API key not found. Please add keys in the settings modal (gear icon).");
-        }
-        return key;
+// Simplified Key Retrieval - SINGLE KEY SUPPORT
+function getGeminiApiKey(): string {
+    const key = localStorage.getItem('gemini_api_key') || (process.env.API_KEY as string);
+    if (!key) {
+        throw new Error("Gemini API key not found. Please add your key in the settings modal (gear icon).");
     }
-};
+    return key;
+}
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Wrapper to create client with the CURRENT active key
 function getAiClient(): GoogleGenAI {
-    const apiKey = KeyManager.getCurrentKey();
+    const apiKey = getGeminiApiKey();
     return new GoogleGenAI({ apiKey });
 }
 
@@ -60,7 +58,7 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
     throw new Error("API call failed after internal retries.");
 }
 
-// Helper to execute with retry (renamed from rotation)
+// Helper to execute with retry
 async function executeWithRetry<T>(
     operation: (client: GoogleGenAI) => Promise<T>
 ): Promise<T> {
