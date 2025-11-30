@@ -88,7 +88,7 @@ function getAiClient(): GoogleGenAI {
     return new GoogleGenAI({ apiKey });
 }
 
-// Helper to identify errors that should trigger a key rotation (Quota, Rate Limit, Suspension)
+// Helper to identify errors that should trigger a key rotation (Quota, Rate Limit, Suspension, Invalid Key)
 function isRotationTrigger(error: any): boolean {
     const errorMessage = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
     return (
@@ -99,11 +99,17 @@ function isRotationTrigger(error: any): boolean {
         errorMessage.includes('403') || 
         errorMessage.includes('permission denied') ||
         errorMessage.includes('suspended') ||
-        errorMessage.includes('consumer') // often appears in suspension messages
+        errorMessage.includes('consumer') ||
+        // 400 Errors usually indicate invalid keys or bad requests. 
+        // We treat them as rotation triggers to skip bad keys in the list.
+        errorMessage.includes('400') ||
+        errorMessage.includes('key not found') ||
+        errorMessage.includes('api key') ||
+        errorMessage.includes('invalid argument') 
     );
 }
 
-// Executes an AI model call with automatic key rotation on Quota/429 errors
+// Executes an AI model call with automatic key rotation on Quota/429/400 errors
 async function executeWithKeyRotation<T>(
     operation: (client: GoogleGenAI) => Promise<T>, 
     modelName: string
@@ -118,7 +124,7 @@ async function executeWithKeyRotation<T>(
     
     // However, if we only have 1 key, we still want to retry transient errors a few times.
     // The inner retry logic inside `withRateLimitHandling` handles transient 500s/429s.
-    // This outer loop handles "Hard Quota" or "Persistent 429" by switching keys.
+    // This outer loop handles "Hard Quota", "Suspension", or "Invalid Key" by switching keys.
     
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
         try {
@@ -127,34 +133,43 @@ async function executeWithKeyRotation<T>(
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
             
-            // Check if error is related to quota or exhaustion
+            // Check if error is related to quota, exhaustion, or invalid key
             const shouldRotate = isRotationTrigger(error);
 
-            // If it's a quota/auth error and we have more keys, rotate and continue loop
+            // If it's a rotation trigger and we have more keys, rotate and continue loop
             if (shouldRotate && KeyManager.keys.length > 1) {
-                console.warn(`⚠️ API Key (Index ${KeyManager.currentIndex}) exhausted or suspended. Attempting to rotate... Error: ${errorMessage}`);
+                console.warn(`⚠️ API Key (Index ${KeyManager.currentIndex}) failed. Attempting to rotate... Error: ${errorMessage}`);
                 KeyManager.rotate();
                 
-                // Add a SIGNIFICANT safety delay during rotation.
-                // Google tracks RPM (requests per minute) across keys from the same IP often.
-                // Hammering rotate too fast can suspend the next key immediately.
-                console.log("Waiting 10 seconds before trying next key to clear IP rate limits...");
-                await delay(10000); 
+                // DYNAMIC DELAY LOGIC:
+                // If it's a 400/Invalid Key error, skip quickly (1s).
+                // If it's a Quota/Suspension error, wait longer (60s) to clear rate limits or cool down.
+                if (
+                    errorMessage.includes('400') || 
+                    errorMessage.includes('key not found') || 
+                    errorMessage.includes('invalid')
+                ) {
+                    console.log("Invalid Key detected. Skipping fast (1s)...");
+                    await delay(1000); 
+                } else {
+                    console.log("Quota exhaustion or Suspension detected. Waiting 60 seconds before trying next key to clear IP rate limits...");
+                    await delay(60000); // 1 minute safety pause
+                }
                 
                 continue; 
             }
 
-            // If it's not a quota error, or we ran out of keys, throw the error up
-            // Note: If we are on the last key and it fails with quota, the loop ends and we throw.
+            // If it's not a rotation error, or we ran out of keys, throw the error up
+            // Note: If we are on the last key and it fails, the loop ends and we throw.
             if (attempt === maxAttempts - 1) {
                 // If this was the last key, we modify the error message to ensure App.tsx detects it as exhaustion
                 if (shouldRotate) {
-                    throw new Error(`All Gemini API Keys exhausted (Quota/Suspended). Last error: ${errorMessage}`);
+                    throw new Error(`All Gemini API Keys exhausted or invalid. Last error: ${errorMessage}`);
                 }
                 throw error;
             }
             
-            throw error; // Non-quota errors (like 400 Bad Request) shouldn't rotate keys usually.
+            throw error; // Non-rotation errors shouldn't rotate keys usually.
         }
     }
     
@@ -178,7 +193,7 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
             const shouldRotate = isRotationTrigger(error);
             const hasBackupKeys = KeyManager.keys.length > 1;
 
-            // OPTIMIZATION: If we hit a quota/auth limit and have other keys available, 
+            // OPTIMIZATION: If we hit a rotation trigger (Quota/Auth/Invalid) and have other keys available, 
             // throw immediately so `executeWithKeyRotation` can switch to the next key.
             // Do NOT waste time retrying on a dead key if we have backups.
             if (shouldRotate && hasBackupKeys) {
@@ -198,8 +213,7 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
 
             let backoffTime;
             if (shouldRotate) {
-                // If we are here, we have only 1 key (or no backups loaded) and hit 429/403. We must wait.
-                // Note: Waiting on 403 Suspended won't help, but logic dictates we try if no backups.
+                // If we are here, we have only 1 key (or no backups loaded) and hit 429/403/400. We must wait.
                 // UPDATED: Increased backoff time significantly to prevent suspension cascades.
                 backoffTime = 8000 + Math.random() * 4000;
             } else {

@@ -488,10 +488,19 @@ const App: React.FC = () => {
                 if (
                     lowerMsg.includes('quota') || 
                     lowerMsg.includes('exhausted') || 
-                    lowerMsg.includes('rotation loop')
+                    lowerMsg.includes('rotation loop') ||
+                    // Catch 400 Bad Request / API Key errors that persist after rotation logic gives up
+                    lowerMsg.includes('api key') ||
+                    lowerMsg.includes('400') ||
+                    lowerMsg.includes('bad request')
                 ) {
-                    setGenerationStatus(`🛑 Limite de cota atingido em TODAS as chaves de API. A automação será pausada.`);
-                    setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: 'upload_failed', latexCode: currentPaper, errorMessage: `Pausado por limite de cota global: ${errorMessage}` }]);
+                    let failReason = "Limite de cota global";
+                    if (lowerMsg.includes('api key') || lowerMsg.includes('400') || lowerMsg.includes('bad request')) {
+                        failReason = "Chave de API Inválida/Não Encontrada";
+                    }
+
+                    setGenerationStatus(`🛑 ${failReason} em TODAS as tentativas. A automação será pausada.`);
+                    setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: 'upload_failed', latexCode: currentPaper, errorMessage: `Pausado por erro crítico: ${errorMessage}` }]);
                     isGenerationCancelled.current = true; 
                     break;
                 }
@@ -517,8 +526,8 @@ const App: React.FC = () => {
         if (isGenerationCancelled.current) {
             // Check if the stop was due to quota or manual cancellation
             setGenerationStatus(prevStatus => {
-                if (prevStatus.includes('Limite de cota')) {
-                    return prevStatus; // Keep the quota message
+                if (prevStatus.includes('Limite de cota') || prevStatus.includes('Chave de API')) {
+                    return prevStatus; // Keep the error message
                 }
                 return "❌ Automação cancelada pelo usuário."; // Default manual cancellation message
             });
