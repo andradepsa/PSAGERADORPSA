@@ -488,8 +488,7 @@ const App: React.FC = () => {
                 if (
                     lowerMsg.includes('quota') || 
                     lowerMsg.includes('exhausted') || 
-                    lowerMsg.includes('rotation loop') ||
-                    lowerMsg.includes('api key') // Added check for invalid key exhaustion
+                    lowerMsg.includes('rotation loop')
                 ) {
                     setGenerationStatus(`🛑 Limite de cota atingido em TODAS as chaves de API. A automação será pausada.`);
                     setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: 'upload_failed', latexCode: currentPaper, errorMessage: `Pausado por limite de cota global: ${errorMessage}` }]);
@@ -906,429 +905,250 @@ const App: React.FC = () => {
         setFilter(prev => ({ ...prev, [name]: value }));
     };
 
-    const filteredArticles = articleEntries.filter(entry => {
-        if (!entry.date) return false;
-        const entryDate = new Date(entry.date);
-        const dayMatch = filter.day ? entryDate.getDate().toString().padStart(2, '0') === filter.day.padStart(2, '0') : true;
-        const monthMatch = filter.month ? (entryDate.getMonth() + 1).toString().padStart(2, '0') === filter.month.padStart(2, '0') : true;
-        const yearMatch = filter.year ? entryDate.getFullYear().toString() === filter.year : true;
-        return dayMatch && monthMatch && yearMatch;
-    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const handleSavePersonalData = (data: PersonalData[]) => {
+        setAuthors(data);
+        setIsPersonalDataModalOpen(false);
+    };
 
+    const handleClearArticleEntries = () => {
+        if (window.confirm("Tem certeza de que deseja limpar todo o histórico de publicações? Esta ação é irreversível.")) {
+            setArticleEntries([]);
+            localStorage.removeItem('article_entries_log');
+            alert("Histórico de publicações limpo com sucesso!");
+        }
+    };
+
+    const sortedArticleEntries = articleEntries.slice().sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    
+    const filteredArticleEntries = sortedArticleEntries.filter(article => {
+        if (!article.date) return false;
+        try {
+            const date = new Date(article.date);
+            const year = date.getFullYear().toString();
+            const month = (date.getMonth() + 1).toString();
+            const day = date.getDate().toString();
+            const matchesYear = !filter.year || year === filter.year;
+            const matchesMonth = !filter.month || month === filter.month;
+            const matchesDay = !filter.day || day === filter.day;
+            return matchesYear && matchesMonth && matchesDay;
+        } catch { return false; }
+    });
+    
     return (
-        <div className="min-h-screen bg-gray-100 font-sans text-gray-900">
-            <div className="max-w-5xl mx-auto px-4 py-8">
-                
-                <h1 className="text-4xl font-extrabold text-center mb-8 text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600">
-                    Advanced Scientific Paper Generator
-                </h1>
+        <div className="container">
+            <ApiKeyModal 
+                isOpen={isApiModalOpen} 
+                onClose={() => setIsApiModalOpen(false)} 
+                onSave={(keys) => { 
+                    // Save Gemini Keys (Array)
+                    localStorage.setItem('gemini_api_keys', JSON.stringify(keys.gemini));
+                    // Save the first key as default for backward compatibility or simple usage
+                    if (keys.gemini.length > 0) {
+                        localStorage.setItem('gemini_api_key', keys.gemini[0]);
+                    }
 
-                <div className="flex justify-end gap-2 mb-4">
-                     <button onClick={() => setIsPersonalDataModalOpen(true)} className="p-2 text-gray-600 hover:text-indigo-600 transition-colors" title="Personal Data">
-                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
-                    </button>
-                    <button onClick={() => setIsApiModalOpen(true)} className="p-2 text-gray-600 hover:text-indigo-600 transition-colors" title="Settings">
-                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                    </button>
+                    if (keys.zenodo) setZenodoToken(keys.zenodo); 
+                    if (keys.xai) localStorage.setItem('xai_api_key', keys.xai); 
+                    setIsApiModalOpen(false); 
+                }} 
+            />
+            <PersonalDataModal
+                isOpen={isPersonalDataModalOpen}
+                onClose={() => setIsPersonalDataModalOpen(false)}
+                onSave={handleSavePersonalData}
+                initialData={authors} // Pass the entire authors array
+            />
+            <div className="main-header">
+                <div className="flex justify-between items-center">
+                    <div>
+                        <h1>🔬 Fluxo Integrado de Publicação Científica</h1>
+                        <p>AI Paper Generator → LaTeX Compiler → Zenodo Uploader</p>
+                    </div>
+                    <div className="flex gap-2"> {/* Container for buttons */}
+                        <button onClick={() => setIsPersonalDataModalOpen(true)} className="p-2 rounded-full hover:bg-gray-200 transition-colors" title="Configurações de Dados Pessoais">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                            </svg>
+                        </button>
+                        <button onClick={() => setIsApiModalOpen(true)} className="p-2 rounded-full hover:bg-gray-200 transition-colors" title="Configurações de API Key">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                        </button>
+                    </div>
                 </div>
+            </div>
 
-                {/* Workflow Steps Tabs */}
-                <div className="flex justify-between mb-8 overflow-x-auto pb-2">
-                     {WORKFLOW_STEPS.map((s) => (
-                        <div 
-                            key={s.id} 
-                            onClick={() => !isGenerating && setStep(s.id)}
-                            className={`flex-1 min-w-[150px] text-center p-3 border-b-4 cursor-pointer transition-colors ${step === s.id ? 'border-indigo-600 text-indigo-700 font-bold' : 'border-gray-200 text-gray-500 hover:text-gray-700'}`}
-                        >
-                            <div className="text-lg">{s.title}</div>
-                            <div className="text-xs font-normal">{s.status}</div>
-                        </div>
-                    ))}
-                </div>
+            <div className="workflow-steps">
+                {WORKFLOW_STEPS.map(s => (<div className={getStepCardClass(s.id)} key={s.id} onClick={() => setStep(s.id)}><div className="step-number">{s.id}</div><div className="step-title">{s.title}</div><div className="step-status">{s.status}</div></div>))}
+            </div>
 
-                {/* Step 1: Configuration & Generation */}
-                {step === 1 && (
-                    <div className="space-y-8 animate-fade-in">
-                        <section className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                            <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
-                                <span className="bg-indigo-100 text-indigo-700 w-8 h-8 rounded-full flex items-center justify-center mr-3 text-sm">1</span>
-                                Configuration
-                            </h2>
-                            
-                            <div className="mb-6">
-                                <label className="block text-gray-700 font-semibold mb-2 text-center">Language</label>
+            {step === 1 && (
+                <div className="card">
+                    <h2>📝 Passo 1: Gerar Artigo com IA</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div>
+                            <h3 className="text-lg font-semibold mb-3">Configurações</h3>
+                            <div className="space-y-4">
                                 <LanguageSelector languages={LANGUAGES} selectedLanguage={language} onSelect={setLanguage} />
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                                <ModelSelector models={AVAILABLE_MODELS} selectedModel={analysisModel} onSelect={setAnalysisModel} label="Modelo Rápido (para análise e título):" />
+                                <ModelSelector models={AVAILABLE_MODELS} selectedModel={generationModel} onSelect={setGenerationModel} label="Modelo Poderoso (para geração e melhoria):" />
+                                <PageSelector options={[12, 30, 60, 100]} selectedPageCount={pageCount} onSelect={setPageCount} />
                                 <div>
-                                    <label className="block text-gray-700 font-semibold mb-2">Target Discipline</label>
-                                    <select 
-                                        className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                    <label htmlFor="discipline-select" className="font-semibold block mb-2">Disciplina para Geração de Título:</label>
+                                    <select
+                                        id="discipline-select"
                                         value={selectedDiscipline}
                                         onChange={(e) => setSelectedDiscipline(e.target.value)}
+                                        className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                                        disabled={isGenerating}
                                     >
-                                        {getAllDisciplines().map(d => <option key={d} value={d}>{d}</option>)}
+                                        {getAllDisciplines().map((discipline) => (
+                                            <option key={discipline} value={discipline}>
+                                                {discipline}
+                                            </option>
+                                        ))}
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="block text-gray-700 font-semibold mb-2">Paper Length</label>
-                                    <PageSelector options={[12, 30, 60, 100]} selectedPageCount={pageCount} onSelect={setPageCount} />
+                                    <label className="font-semibold block mb-2">Número de Artigos a Gerar (Manual):</label>
+                                    <input type="number" min="1" max="100" value={numberOfArticles} onChange={(e) => setNumberOfArticles(Math.max(1, Number(e.target.value)))} className="w-full" disabled={isContinuousMode || isSchedulerEnabled} />
                                 </div>
                             </div>
-
-                            <ModelSelector 
-                                models={AVAILABLE_MODELS} 
-                                selectedModel={generationModel} 
-                                onSelect={setGenerationModel} 
-                                label="Generation Model"
-                            />
+                            <div className="mt-6 text-center">
+                                <ActionButton onClick={() => handleFullAutomation()} disabled={isGenerating} isLoading={isGenerating} text={`Iniciar Automação (${isContinuousMode || isSchedulerEnabled ? 7 : numberOfArticles} Artigo${(isContinuousMode || isSchedulerEnabled ? 7 : numberOfArticles) > 1 ? 's' : ''})`} loadingText="Em Progresso..." completed={isGenerationComplete} />
+                                {isGenerating && (<button onClick={() => { isGenerationCancelled.current = true; setGenerationStatus("🔄 Cancelando após o artigo atual..."); }} className="btn bg-red-600 text-white hover:bg-red-700 mt-4">Cancelar Automação</button>)}
+                            </div>
                             
-                            <ModelSelector 
-                                models={AVAILABLE_MODELS} 
-                                selectedModel={analysisModel} 
-                                onSelect={setAnalysisModel} 
-                                label="Analysis & Critique Model"
-                            />
-                        </section>
-
-                        <section className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                             <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
-                                <span className="bg-indigo-100 text-indigo-700 w-8 h-8 rounded-full flex items-center justify-center mr-3 text-sm">2</span>
-                                Automation Settings
-                            </h2>
-                             <div className="flex flex-col sm:flex-row gap-6 justify-center items-center">
-                                <div className="flex items-center gap-2">
-                                    <label className="flex items-center cursor-pointer">
-                                        <div className="relative">
-                                            <input type="checkbox" className="sr-only" checked={isContinuousMode} onChange={handleToggleContinuousMode} />
-                                            <div className={`block w-14 h-8 rounded-full transition-colors ${isContinuousMode ? 'bg-indigo-600' : 'bg-gray-300'}`}></div>
-                                            <div className={`dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform ${isContinuousMode ? 'transform translate-x-6' : ''}`}></div>
-                                        </div>
-                                        <div className="ml-3 text-gray-700 font-medium">Continuous Mode</div>
-                                    </label>
+                            <div className="mt-6 border-t pt-6 grid grid-cols-2 gap-4">
+                                <div>
+                                    <h4 className="font-semibold text-center mb-2 text-gray-700">Automação Contínua (Loop)</h4>
+                                    <div className="flex items-center justify-center gap-2"><span className={`font-semibold transition-colors ${!isContinuousMode ? 'text-indigo-600' : 'text-gray-500'}`}>Off</span><label htmlFor="continuousToggle" className="relative inline-flex items-center cursor-pointer"><input type="checkbox" checked={isContinuousMode} onChange={handleToggleContinuousMode} id="continuousToggle" className="sr-only peer" /><div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div></label><span className={`font-semibold transition-colors ${isContinuousMode ? 'text-indigo-600' : 'text-gray-500'}`}>On</span></div>
+                                    <p className="text-center text-xs text-gray-500 mt-1">Gera artigos continuamente com pausas.</p>
                                 </div>
-
-                                <div className="flex items-center gap-2">
-                                     <label className="flex items-center cursor-pointer">
-                                        <div className="relative">
-                                            <input type="checkbox" className="sr-only" checked={isSchedulerEnabled} onChange={handleToggleScheduler} />
-                                            <div className={`block w-14 h-8 rounded-full transition-colors ${isSchedulerEnabled ? 'bg-indigo-600' : 'bg-gray-300'}`}></div>
-                                            <div className={`dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform ${isSchedulerEnabled ? 'transform translate-x-6' : ''}`}></div>
-                                        </div>
-                                        <div className="ml-3 text-gray-700 font-medium">Scheduler (05:00 / 12:00)</div>
-                                    </label>
-                                </div>
-                                
-                                <div className="flex items-center gap-2">
-                                    <label className="text-gray-700 font-medium">Batch Size:</label>
-                                    <input 
-                                        type="number" 
-                                        min="1" 
-                                        max="10" 
-                                        value={numberOfArticles} 
-                                        onChange={(e) => setNumberOfArticles(Math.max(1, parseInt(e.target.value) || 1))}
-                                        className="w-16 p-1 border border-gray-300 rounded text-center"
-                                        disabled={isContinuousMode} // Continuous mode overrides this to 1
-                                    />
+                                 <div>
+                                    <h4 className="font-semibold text-center mb-2 text-gray-700">Agendamento Automático</h4>
+                                    <div className="flex items-center justify-center gap-2"><span className={`font-semibold transition-colors ${!isSchedulerEnabled ? 'text-indigo-600' : 'text-gray-500'}`}>Off</span><label htmlFor="schedulerToggle" className="relative inline-flex items-center cursor-pointer"><input type="checkbox" checked={isSchedulerEnabled} onChange={handleToggleScheduler} id="schedulerToggle" className="sr-only peer" /><div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div></label><span className={`font-semibold transition-colors ${isSchedulerEnabled ? 'text-indigo-600' : 'text-gray-500'}`}>On</span></div>
+                                    <p className="text-center text-xs text-gray-500 mt-1">Inicia lotes às 05h e 12h.</p>
                                 </div>
                             </div>
-                        </section>
 
-                        <div className="text-center">
-                            <ActionButton 
-                                onClick={() => handleFullAutomation()} 
-                                disabled={isGenerating} 
-                                isLoading={isGenerating} 
-                                text={isContinuousMode ? "Start Continuous Loop" : "Generate Paper(s)"}
-                                loadingText="Processing..." 
-                            />
-                            {isGenerating && (
-                                <button 
-                                    onClick={() => isGenerationCancelled.current = true}
-                                    className="mt-4 text-red-600 underline text-sm hover:text-red-800"
-                                >
-                                    Stop Automation
-                                </button>
+                        </div>
+                        <div className="bg-gray-50 p-4 rounded-lg">
+                            {isGenerating ? (
+                                <>
+                                    <h3 className="text-lg font-semibold mb-3">Progresso da Geração</h3>
+                                    <ProgressBar progress={generationProgress} isVisible={isGenerating} />
+                                    <p className="text-center text-gray-600 mb-4">{generationStatus}</p>
+                                    <div className="border-t pt-4 mt-4"><h4 className="font-semibold mb-2">Resultados da Análise em Tempo Real</h4><ResultsDisplay analysisResults={analysisResults} totalIterations={TOTAL_ITERATIONS} /></div>
+                                    <div className="border-t pt-4 mt-4"><h4 className="font-semibold mb-2">Fontes Utilizadas</h4><SourceDisplay sources={paperSources} /></div>
+                                </>
+                            ) : (
+                                <div className="text-center p-8">
+                                    <h3 className="text-xl font-semibold text-gray-700">Aguardando Início</h3>
+                                    <p className="text-gray-500 mt-2">Configure as opções e inicie a automação. O progresso aparecerá aqui.</p>
+                                    {finalLatexCode && (<div className="mt-6"><button onClick={handleProceedToCompile} className="btn btn-success">✅ Geração Concluída! Ir para a Etapa 2</button></div>)}
+                                </div>
                             )}
                         </div>
-                        
-                        {isGenerating && (
-                            <div className="mt-8 p-6 bg-white rounded-xl shadow-lg border-t-4 border-indigo-500 animate-pulse-soft">
-                                <h3 className="text-lg font-bold text-gray-800 mb-2 text-center">{generationStatus}</h3>
-                                <ProgressBar progress={generationProgress} isVisible={true} />
-                                {generatedTitle && <p className="text-center text-gray-600 italic mt-2">Current Title: "{generatedTitle}"</p>}
-                            </div>
-                        )}
-
-                        {analysisResults.length > 0 && (
-                            <div className="mt-8">
-                                <h3 className="text-xl font-bold mb-4">Latest Analysis</h3>
-                                <ResultsDisplay analysisResults={analysisResults} totalIterations={TOTAL_ITERATIONS} />
-                            </div>
-                        )}
-                        
-                        {paperSources.length > 0 && (
-                             <div className="mt-8">
-                                <SourceDisplay sources={paperSources} />
-                             </div>
-                        )}
-                        
-                        {isGenerationComplete && !isContinuousMode && (
-                             <div className="text-center mt-8">
-                                <button 
-                                    onClick={handleProceedToCompile}
-                                    className="bg-green-600 text-white px-8 py-3 rounded-full font-bold shadow-lg hover:bg-green-700 transition-transform transform hover:scale-105"
-                                >
-                                    Proceed to Compilation
-                                </button>
-                            </div>
-                        )}
                     </div>
-                )}
+                </div>
+            )}
 
-                {/* Step 2: Compile & Edit */}
-                {step === 2 && (
-                    <div className="space-y-6 animate-fade-in">
-                        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                             <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
-                                <span className="bg-indigo-100 text-indigo-700 w-8 h-8 rounded-full flex items-center justify-center mr-3 text-sm">2</span>
-                                LaTeX Compilation & Editing
-                            </h2>
-
-                            <LatexCompiler code={latexCode} onCodeChange={setLatexCode} />
-
-                            <div className="mt-6 border-t pt-6">
-                                <h3 className="font-bold text-gray-800 mb-3">Bibliography Formatting</h3>
-                                <div className="flex flex-col sm:flex-row items-center gap-4">
-                                    <StyleGuideSelector guides={STYLE_GUIDES} selectedGuide={selectedStyle} onSelect={setSelectedStyle} />
-                                    <button 
-                                        onClick={handleApplyStyleGuide}
-                                        disabled={isReformatting}
-                                        className="px-4 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 disabled:opacity-50 font-medium"
-                                    >
-                                        {isReformatting ? 'Applying...' : 'Apply Style'}
-                                    </button>
+            {step === 2 && (
+                <div className="card">
+                    <h2>🖋️ Passo 2: Compilar & Revisar</h2>
+                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div><LatexCompiler code={latexCode} onCodeChange={setLatexCode} /></div>
+                        <div>
+                             <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm space-y-6 sticky top-5">
+                                 <div>
+                                    <h3 className="text-lg font-semibold text-gray-800 mb-3">Ferramentas de Formatação</h3>
+                                    <div className="p-4 bg-gray-50 rounded-lg space-y-4">
+                                        <div><label className="font-semibold block mb-2">Guia de Estilo (Bibliografia):</label><StyleGuideSelector guides={STYLE_GUIDES} selectedGuide={selectedStyle} onSelect={setSelectedStyle} /></div>
+                                        <button onClick={handleApplyStyleGuide} disabled={isReformatting || isCompiling} className="btn btn-primary w-full">{isReformatting && <span className="spinner"></span>}{isReformatting ? 'Aplicando Estilo...' : 'Aplicar Guia de Estilo'}</button>
+                                    </div>
                                 </div>
-                            </div>
-                            
-                            <div className="mt-6 flex flex-wrap gap-4 justify-center">
-                                <div className="flex items-center gap-2 border p-2 rounded-lg bg-gray-50">
-                                    <input 
-                                        type="radio" 
-                                        id="texlive" 
-                                        name="compileMethod" 
-                                        checked={compileMethod === 'texlive'} 
-                                        onChange={() => setCompileMethod('texlive')} 
-                                    />
-                                    <label htmlFor="texlive">TeXLive.net (Direct)</label>
+                                <div>
+                                    <h3 className="text-lg font-semibold text-gray-800 mb-3">Opções de Compilação</h3>
+                                    <div className="p-4 bg-gray-50 rounded-lg space-y-4">
+                                        <div className="flex items-center justify-around"><label className="flex items-center cursor-pointer"><input type="radio" name="compileMethod" value="texlive" checked={compileMethod === 'texlive'} onChange={() => setCompileMethod('texlive')} className="form-radio h-4 w-4 text-indigo-600"/><span className="ml-2 text-gray-700">Compilador Online (Recomendado)</span></label><label className="flex items-center cursor-pointer"><input type="radio" name="compileMethod" value="overleaf" checked={compileMethod === 'overleaf'} onChange={() => setCompileMethod('overleaf')} className="form-radio h-4 w-4 text-indigo-600"/><span className="ml-2 text-gray-700">Enviar para Overleaf</span></label></div>
+                                        <button onClick={handleCompileLaTeX} disabled={isCompiling || isReformatting} className="btn btn-primary w-full">{isCompiling && <span className="spinner"></span>}{isCompiling ? 'Compilando...' : 'Compilar LaTeX'}</button>
+                                    </div>
                                 </div>
-                                <div className="flex items-center gap-2 border p-2 rounded-lg bg-gray-50">
-                                    <input 
-                                        type="radio" 
-                                        id="overleaf" 
-                                        name="compileMethod" 
-                                        checked={compileMethod === 'overleaf'} 
-                                        onChange={() => setCompileMethod('overleaf')} 
-                                    />
-                                    <label htmlFor="overleaf">Overleaf (Manual)</label>
-                                </div>
-                            </div>
-
-                            <div className="mt-6 text-center">
-                                <button 
-                                    onClick={handleCompileLaTeX}
-                                    disabled={isCompiling}
-                                    className="bg-indigo-600 text-white px-8 py-3 rounded-full font-bold shadow-lg hover:bg-indigo-700 disabled:bg-gray-400 transition-all"
-                                >
-                                    {isCompiling ? 'Compiling...' : 'Compile PDF'}
-                                </button>
-                            </div>
-                            
-                            <div className="mt-4 text-center">
-                                {compilationStatus}
+                                <div className="mt-4">{compilationStatus}</div>
+                                {pdfPreviewUrl && (<div className="mt-4"><h3 className="text-lg font-semibold text-gray-800 mb-2">Preview do PDF</h3><div className="iframe-container"><iframe src={pdfPreviewUrl} title="PDF Preview"></iframe></div><button onClick={handleProceedToUpload} className="btn btn-success w-full mt-4">Avançar para a Publicação</button></div>)}
                             </div>
                         </div>
-
-                        {pdfPreviewUrl && (
-                             <div className="bg-white p-4 rounded-xl shadow-lg border border-gray-200">
-                                <h3 className="font-bold mb-2 text-gray-700">PDF Preview</h3>
-                                <iframe src={pdfPreviewUrl} className="w-full h-[600px] border rounded" title="PDF Preview"></iframe>
-                                <div className="mt-4 text-center">
-                                     <button 
-                                        onClick={handleProceedToUpload}
-                                        className="bg-green-600 text-white px-8 py-3 rounded-full font-bold shadow-lg hover:bg-green-700 transition-transform transform hover:scale-105"
-                                    >
-                                        Proceed to Zenodo Upload
-                                    </button>
-                                </div>
-                             </div>
-                        )}
                     </div>
-                )}
-
-                {/* Step 3: Upload */}
-                {step === 3 && (
-                     <div className="animate-fade-in">
-                        <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center bg-white p-4 rounded-lg shadow-sm">
-                            <span className="bg-indigo-100 text-indigo-700 w-8 h-8 rounded-full flex items-center justify-center mr-3 text-sm">3</span>
-                            Zenodo Publication
-                        </h2>
+                </div>
+            )}
+            
+            {step === 3 && (
+                 <div className="card">
+                     <h2>🚀 Passo 3: Publicar no Zenodo</h2>
+                     <div className="max-w-3xl mx-auto">
                         <ZenodoUploader 
-                            ref={uploaderRef}
-                            title={extractedMetadata.title}
-                            abstractText={extractedMetadata.abstract}
-                            keywords={keywordsInput}
-                            authors={extractedMetadata.authors.map(a => ({ name: a.name, affiliation: a.affiliation, orcid: a.orcid }))}
-                            compiledPdfFile={compiledPdfFile}
-                            onFileSelect={(file) => setCompiledPdfFile(file)}
-                            onPublishStart={() => { setIsUploading(true); setUploadStatus(null); }}
-                            onPublishSuccess={(res) => {
-                                setIsUploading(false);
-                                setUploadStatus(<div className="status-message status-success">✅ Published! DOI: {res.doi}</div>);
-                                setArticleEntries(prev => [...prev, {
-                                    id: crypto.randomUUID(),
-                                    title: extractedMetadata.title,
-                                    date: new Date().toISOString(),
-                                    status: 'published',
-                                    doi: res.doi,
-                                    link: res.zenodoLink
-                                }]);
-                                alert(`Successfully published! DOI: ${res.doi}`);
-                            }}
-                            onPublishError={(msg) => {
-                                setIsUploading(false);
-                                setUploadStatus(<div className="status-message status-error">❌ {msg}</div>);
-                            }}
-                            extractedMetadata={extractedMetadata}
-                        />
-                         <div className="mt-6 text-center">
-                            <ActionButton 
-                                onClick={() => uploaderRef.current?.submit()} 
-                                disabled={isUploading || !compiledPdfFile} 
-                                isLoading={isUploading} 
-                                text="Publish to Zenodo" 
-                                loadingText="Publishing..." 
-                            />
-                            <div className="mt-4">{uploadStatus}</div>
-                         </div>
+                            ref={uploaderRef} 
+                            title={extractedMetadata.title} 
+                            abstractText={extractedMetadata.abstract} 
+                            keywords={extractedMetadata.keywords} 
+                            authors={authors} // Pass the entire authors array
+                            compiledPdfFile={compiledPdfFile} 
+                            onFileSelect={() => {}} 
+                            onPublishStart={() => { setIsUploading(true); setUploadStatus(<div className="status-message status-info">⏳ Publicando...</div>); }} 
+                            onPublishSuccess={(result) => { setUploadStatus(<div className="status-message status-success"><p>✅ Publicado com sucesso!</p><p><strong>DOI:</strong> {result.doi}</p><p><strong>Link:</strong> <a href={result.zenodoLink} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">{result.zenodoLink}</a></p></div>); setArticleEntries(prev => prev.map(entry => { if (entry.title === extractedMetadata.title && entry.status !== 'published') { return { ...entry, status: 'published', doi: result.doi, link: result.zenodoLink, date: new Date().toISOString(), latexCode: undefined, errorMessage: undefined, }; } return entry; })); }} 
+                            onPublishError={(message) => setUploadStatus(<div className="status-message status-error">❌ {message}</div>)} 
+                            extractedMetadata={extractedMetadata} />
+                         <div className="mt-6 text-center"><ActionButton onClick={() => uploaderRef.current?.submit()} disabled={isUploading} isLoading={isUploading} text="Publicar Agora" loadingText="Publicando..." /></div>
+                        <div className="mt-4">{uploadStatus}</div>
                      </div>
-                )}
-
-                {/* Step 4: Published Articles Log */}
-                {step === 4 && (
-                    <div className="animate-fade-in bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                         <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center">
-                            <span className="bg-indigo-100 text-indigo-700 w-8 h-8 rounded-full flex items-center justify-center mr-3 text-sm">4</span>
-                            Article History & Logs
-                        </h2>
-
-                        <div className="mb-6 flex flex-wrap gap-4 bg-gray-50 p-4 rounded-lg">
-                            <input 
-                                type="text" 
-                                name="day" 
-                                placeholder="DD" 
-                                value={filter.day} 
-                                onChange={handleFilterChange} 
-                                className="w-20 p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500" 
-                            />
-                            <input 
-                                type="text" 
-                                name="month" 
-                                placeholder="MM" 
-                                value={filter.month} 
-                                onChange={handleFilterChange} 
-                                className="w-20 p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500" 
-                            />
-                            <input 
-                                type="text" 
-                                name="year" 
-                                placeholder="YYYY" 
-                                value={filter.year} 
-                                onChange={handleFilterChange} 
-                                className="w-24 p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500" 
-                            />
-                            <div className="text-sm text-gray-500 flex items-center ml-2">Filter by Date</div>
+                 </div>
+            )}
+            
+            {step === 4 && (
+                <div className="card">
+                    <h2>📚 Passo 4: Artigos Publicados</h2>
+                    <div className="mb-6 p-4 bg-gray-50 rounded-lg border flex flex-col sm:flex-row justify-between items-center gap-4">
+                        <div className="flex flex-col sm:flex-row flex-wrap items-center gap-4">
+                            <h3 className="font-semibold mb-2 sm:mb-0">Filtrar por Data:</h3>
+                            <input type="text" name="day" value={filter.day} onChange={handleFilterChange} placeholder="Dia (ex: 5)" className="w-24"/>
+                            <input type="text" name="month" value={filter.month} onChange={handleFilterChange} placeholder="Mês (ex: 8)" className="w-24"/>
+                            <input type="text" name="year" value={filter.year} onChange={handleFilterChange} placeholder="Ano (ex: 2024)" className="w-32"/>
                         </div>
-
-                        <div className="overflow-x-auto">
-                            <table className="min-w-full divide-y divide-gray-200">
-                                <thead className="bg-gray-50">
-                                    <tr>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="bg-white divide-y divide-gray-200">
-                                    {filteredArticles.length > 0 ? filteredArticles.map((article) => (
-                                        <tr key={article.id}>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                {new Date(article.date).toLocaleString()}
-                                            </td>
-                                            <td className="px-6 py-4 text-sm font-medium text-gray-900">
-                                                {article.title}
-                                                {article.errorMessage && <div className="text-xs text-red-500 mt-1 max-w-xs truncate">{article.errorMessage}</div>}
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                                                    article.status === 'published' ? 'bg-green-100 text-green-800' : 
-                                                    article.status === 'upload_failed' ? 'bg-red-100 text-red-800' :
-                                                    'bg-yellow-100 text-yellow-800'
-                                                }`}>
-                                                    {article.status === 'published' ? 'Published' : article.status === 'compilation_failed' ? 'Compile Error' : 'Upload Error'}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                                {article.status === 'published' && article.link ? (
-                                                    <a href={article.link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-900">View Zenodo</a>
-                                                ) : (
-                                                     <div className="flex flex-col gap-2">
-                                                        <button 
-                                                            onClick={() => handleRepublishPending(article.id)} 
-                                                            disabled={!!isRepublishingId}
-                                                            className="text-indigo-600 hover:text-indigo-900 disabled:opacity-50"
-                                                        >
-                                                            {isRepublishingId === article.id ? 'Retrying...' : 'Retry Publish'}
-                                                        </button>
-                                                        {article.latexCode && (
-                                                            <button 
-                                                                onClick={() => {
-                                                                    setLatexCode(article.latexCode!);
-                                                                    setStep(2);
-                                                                }}
-                                                                className="text-gray-600 hover:text-gray-900 text-xs"
-                                                            >
-                                                                Edit LaTeX
-                                                            </button>
-                                                        )}
-                                                     </div>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    )) : (
-                                        <tr>
-                                            <td colSpan={4} className="px-6 py-4 text-center text-gray-500">No articles found.</td>
-                                        </tr>
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
+                        <button 
+                            onClick={handleClearArticleEntries} 
+                            className="px-4 py-2 text-sm font-semibold text-white bg-red-600 rounded-md hover:bg-red-700 transition-colors flex items-center gap-1"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm6 0a1 1 0 11-2 0v6a1 1 0 112 0V8z" clipRule="evenodd" />
+                            </svg>
+                            Limpar Histórico
+                        </button>
                     </div>
-                )}
-            </div>
-
-            <ApiKeyModal isOpen={isApiModalOpen} onClose={() => setIsApiModalOpen(false)} onSave={() => setIsApiModalOpen(false)} />
-            <PersonalDataModal 
-                isOpen={isPersonalDataModalOpen} 
-                onClose={() => setIsPersonalDataModalOpen(false)} 
-                initialData={authors}
-                onSave={(data) => {
-                    setAuthors(data);
-                    setIsPersonalDataModalOpen(false);
-                }}
-            />
+                    <div className="overflow-x-auto">
+                         <table className="min-w-full bg-white border border-gray-200">
+                            <thead className="bg-gray-100"><tr><th className="py-3 px-4 text-left font-semibold text-gray-600">Título do Artigo</th><th className="py-3 px-4 text-left font-semibold text-gray-600">Data</th><th className="py-3 px-4 text-left font-semibold text-gray-600">Status</th><th className="py-3 px-4 text-left font-semibold text-gray-600">Link/Ação</th></tr></thead>
+                            <tbody>
+                                {filteredArticleEntries.length > 0 ? filteredArticleEntries.map((article) => (
+                                    <tr key={article.id} className="border-b hover:bg-gray-50">
+                                        <td className="py-3 px-4">{article.title}</td>
+                                        <td className="py-3 px-4">{new Date(article.date).toLocaleString()}</td>
+                                        <td className="py-3 px-4">
+                                            {article.status === 'published' && <span className="px-2 py-1 text-xs font-semibold text-green-800 bg-green-100 rounded-full">Publicado</span>}
+                                            {article.status === 'compilation_failed' && <span className="px-2 py-1 text-xs font-semibold text-red-800 bg-red-100 rounded-full">Falha na Compilação</span>}
+                                            {article.status === 'upload_failed' && <span className="px-2 py-1 text-xs font-semibold text-orange-800 bg-orange-100 rounded-full">Falha no Upload</span>}
+                                            {article.errorMessage && <p className="text-xs text-gray-500 mt-1">{article.errorMessage}</p>}
+                                        </td>
+                                        <td className="py-3 px-4">
+                                            {article.status === 'published' && article.link ? (<a href={article.link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">{article.doi || "Ver DOI"}</a>) : (<button onClick={() => handleRepublishPending(article.id)} disabled={isRepublishingId === article.id || !article.latexCode} className="px-3 py-1 text-sm font-semibold text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-1">{isRepublishingId === article.id && <span className="spinner w-4 h-4"></span>}{isRepublishingId === article.id ? 'Publicando...' : 'Publicar Artigo'}</button>)}
+                                        </td>
+                                    </tr>
+                                )) : (<tr><td colSpan={4} className="text-center py-8 text-gray-500">Nenhum artigo encontrado.</td></tr>)}
+                            </tbody>
+                        </table>
+                        {isRepublishingId && uploadStatus && (<div className="mt-4 p-3 border-l-4 border-indigo-500 bg-indigo-50 text-indigo-800">{uploadStatus}</div>)}
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
