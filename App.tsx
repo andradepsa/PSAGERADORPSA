@@ -511,6 +511,15 @@ const App: React.FC = () => {
                 await new Promise(resolve => setTimeout(resolve, pauseDuration));
                 continue; // Continue to the next article in the loop for non-quota errors
             }
+
+            // After processing an article, introduce a cooldown before starting the next one
+            // in a manual batch to prevent hitting API rate limits.
+            // This does not apply to the very last article in the batch or to continuous mode.
+            if (!isContinuousMode && i < articlesToProcess && !isGenerationCancelled.current) {
+                const cooldownSeconds = 60; // 60 seconds to safely reset per-minute quota
+                setGenerationStatus(`Artigo ${i}/${articlesToProcess} concluído. Pausando por ${cooldownSeconds}s para evitar limites de taxa...`);
+                await new Promise(resolve => setTimeout(resolve, cooldownSeconds * 1000));
+            }
         } // end for loop
 
         setIsGenerating(false); // Stop generation state regardless of how the loop ended.
