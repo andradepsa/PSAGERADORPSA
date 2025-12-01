@@ -376,6 +376,45 @@ function extractDocumentBody(latex: string): string {
 }
 
 /**
+ * STRATEGIC OPTIMIZATION:
+ * Extracts only the Abstract, Introduction, and Conclusion.
+ * This reduces input tokens for analysis by ~60-70% while keeping the critical
+ * "promise" (Intro) and "delivery" (Conclusion) context.
+ */
+function extractStrategicContext(latex: string): { text: string, isTruncated: boolean } {
+    let combined = "";
+    
+    // 1. Extract Abstract
+    const abstractMatch = latex.match(/\\begin\{abstract\}([\s\S]*?)\\end\{abstract\}/i);
+    if (abstractMatch) {
+        combined += "\\section*{Abstract}\n" + abstractMatch[1].trim() + "\n\n";
+    }
+
+    // 2. Extract Introduction
+    // Matches content starting at \section{Introduction} until the next \section
+    const introMatch = latex.match(/\\section\{(?:Introduction|Introdução)\}([\s\S]*?)(?=\\section\{)/i);
+    if (introMatch) {
+        combined += "\\section{Introduction}\n" + introMatch[1].trim() + "\n\n";
+        combined += "\n% ... [MIDDLE SECTIONS (Literature, Methodology, Results, Discussion) OMITTED FOR AI ANALYSIS EFFICIENCY] ...\n\n";
+    }
+
+    // 3. Extract Conclusion
+    // Matches content starting at \section{Conclusion} until the next \section or end of doc
+    const conclusionMatch = latex.match(/\\section\{(?:Conclusion|Conclusão|Considerações Finais)\}([\s\S]*?)(?=\\section\{|\\end\{document\})/i);
+    if (conclusionMatch) {
+        combined += "\\section{Conclusion}\n" + conclusionMatch[1].trim() + "\n\n";
+    }
+
+    // Safety Fallback: If regex failed (e.g. customized section names) or result is too short,
+    // revert to full body extraction to ensure the AI has something to analyze.
+    if (combined.length < 500) {
+        return { text: extractDocumentBody(latex), isTruncated: false };
+    }
+
+    return { text: combined, isTruncated: true };
+}
+
+/**
  * Fetches papers from the Semantic Scholar API based on a query.
  * PROXIED to avoid CORS issues in the browser.
  * @param query The search query string (e.g., paper title).
@@ -597,21 +636,32 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
         required: ["analysis"],
     };
 
+    // Calculate rough page estimate from the FULL content before stripping (approx 3000 chars per page in LaTeX)
+    const estimatedPagesFromChars = Math.max(1, Math.round(paperContent.length / 3000));
+
     // Strip comments to reduce token usage
     const cleanPaper = stripLatexComments(paperContent);
 
-    // OPTIMIZATION: Context Stripping
-    // We only send the body content for analysis. The preamble (packages, settings) 
-    // is irrelevant for analyzing text quality and consumes unnecessary tokens.
-    const bodyOnlyPaper = extractDocumentBody(cleanPaper);
+    // OPTIMIZATION: Context Stripping / Strategic Extraction
+    // We only send the Abstract, Introduction and Conclusion for analysis to save massive tokens.
+    // The middleware is assumed good if the "bookends" (Intro/Conclusion) are solid.
+    const contextObj = extractStrategicContext(cleanPaper);
+    const paperToAnalyze = contextObj.text;
+
+    // Modify prompt to inform AI about the truncation if it happened
+    const truncationNote = contextObj.isTruncated 
+        ? `\n\n**IMPORTANT CONTEXT NOTE:** To save processing resources, the text provided below is a **STRATEGIC EXTRACT** containing only the Abstract, Introduction, and Conclusion. \n- The actual full document is approximately **${estimatedPagesFromChars} pages** long. \n- When evaluating 'Structure', 'Coherence', or 'Page Count', assume the missing middle sections (Methodology, Results, Discussion) exist and are consistent with the Introduction/Conclusion. \n- Base your score for Topic 28 (Page Count) on the calculated length of ${estimatedPagesFromChars} pages, NOT the word count of this extract.`
+        : "";
+
+    const finalSystemInstruction = systemInstruction + truncationNote;
 
     // Retry logic for JSON parsing failures
     const MAX_PARSE_RETRIES = 3;
     
     for (let attempt = 1; attempt <= MAX_PARSE_RETRIES; attempt++) {
         try {
-            // Use bodyOnlyPaper instead of cleanPaper to save tokens
-            const response = await callModel(model, systemInstruction, bodyOnlyPaper, {
+            // Use strategic paper context instead of full body
+            const response = await callModel(model, finalSystemInstruction, paperToAnalyze, {
                 jsonOutput: true,
                 responseSchema: responseSchema
             });
