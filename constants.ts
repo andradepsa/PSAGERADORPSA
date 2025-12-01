@@ -14,13 +14,10 @@ export const LANGUAGES: LanguageOption[] = [
 ];
 
 export const AVAILABLE_MODELS: {name: string, description: string}[] = [
-    { name: 'gemini-2.5-flash', description: 'Google: Fast and efficient.' },
-    { name: 'gemini-2.5-pro', description: 'Google: Complex reasoning.' },
-    { name: 'gemini-3-pro-preview', description: 'Google: Next-gen reasoning.' },
-    { name: 'grok-4-latest', description: 'x.ai: Powerful model.' },
-    { name: 'puter-gpt-4o', description: 'Puter: GPT-4o (Free Access)' },
-    { name: 'puter-claude-3-5-sonnet', description: 'Puter: Claude 3.5 Sonnet (Free Access)' },
-    { name: 'puter-mistral-large', description: 'Puter: Mistral Large' },
+    { name: 'gemini-2.5-flash', description: 'Fast and efficient for most tasks.' },
+    { name: 'gemini-2.5-pro', description: 'More powerful for complex generation and reasoning.' },
+    { name: 'gemini-3-pro-preview', description: 'Next-gen model for advanced reasoning and STEM tasks.' },
+    { name: 'grok-4-latest', description: 'Powerful model from x.ai.' },
 ];
 
 export const STYLE_GUIDES: StyleGuideOption[] = [
