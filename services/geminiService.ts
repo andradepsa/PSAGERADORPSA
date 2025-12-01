@@ -390,13 +390,13 @@ export async function generateInitialPaper(title: string, language: Language, pa
     ).join('\n\n');
 
     // Fetch Semantic Scholar papers
-    // Otimização: Reduzido de 5 para 3 para economizar tokens
+    // Otimização Cirúrgica: Reduzido de 5 para 3, e abstracts limitados a 200 chars para economizar tokens de entrada.
     const semanticScholarPapers = await fetchSemanticScholarPapers(title, 3); 
     const semanticScholarContext = semanticScholarPapers.length > 0
-        ? "\n\n**Additional Academic Sources from Semantic Scholar (prioritize these for high-quality references):**\n" +
+        ? "\n\n**Additional Academic Sources from Semantic Scholar:**\n" +
           semanticScholarPapers.map(p => {
-              // Otimização: Truncar abstract para 300 caracteres
-              const abstractLimit = 300;
+              // Otimização: Truncar abstract para 200 caracteres para economizar tokens sem perder contexto
+              const abstractLimit = 200;
               const abstractContent = p.abstract 
                   ? (p.abstract.length > abstractLimit ? p.abstract.substring(0, abstractLimit) + "..." : p.abstract)
                   : 'N/A';
@@ -526,14 +526,14 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
     4.  The "PAGE COUNT" topic (Topic 28) must be evaluated based on the user's requested page count of ${pageCount}. A perfect score of 10 is achieved if the paper is exactly ${pageCount} pages long. The score should decrease linearly based on the deviation from this target. For example, if the paper is ${pageCount - 2} or ${pageCount + 2} pages, the score might be around 8.0.
 
     **Output Format:**
-    -   You MUST return your analysis as a single, valid JSON object.
+    -   You MUST return your analysis as a single, valid JSON object using minified keys to save space.
     -   Do NOT include any text, explanations, or markdown formatting (like \`\`\`json) outside of the JSON object.
     -   **Do NOT output LaTeX commands (like \\nobreak, \\newline) inside the JSON values.**
-    -   The JSON object must have a single key "analysis" which is an array of objects.
+    -   The JSON object must have a single key "a" (short for analysis) which is an array of objects.
     -   Each object in the array must have three keys:
-        1.  "topicNum": The numeric identifier of the topic being analyzed (number).
-        2.  "score": The numeric score from 0.0 to 10.0 (number).
-        3.  "improvement": The single-sentence improvement suggestion (string).
+        1.  "t": The numeric identifier of the topic (topicNum).
+        2.  "s": The numeric score from 0.0 to 10.0 (score).
+        3.  "i": The single-sentence improvement suggestion (improvement).
 
     **Analysis Topics:**
     ${analysisTopicsList}
@@ -541,39 +541,32 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
     **Example Output:**
     \`\`\`json
     {
-      "analysis": [
-        {
-          "topicNum": 0,
-          "score": 8.5,
-          "improvement": "The discussion section slightly deviates into an unrelated sub-topic that should be removed to maintain focus."
-        },
-        {
-          "topicNum": 1,
-          "score": 7.8,
-          "improvement": "Several paragraphs contain run-on sentences that should be split for better readability."
-        }
+      "a": [
+        { "t": 0, "s": 8.5, "i": "The discussion section deviates into unrelated sub-topics." },
+        { "t": 1, "s": 7.8, "i": "Several paragraphs contain run-on sentences." }
       ]
     }
     \`\`\`
     `;
     
+    // Otimização Cirúrgica: Uso de chaves curtas (t, s, i) para reduzir tokens de saída.
     const responseSchema = {
         type: Type.OBJECT,
         properties: {
-            analysis: {
+            a: {
                 type: Type.ARRAY,
                 items: {
                     type: Type.OBJECT,
                     properties: {
-                        topicNum: { type: Type.NUMBER },
-                        score: { type: Type.NUMBER },
-                        improvement: { type: Type.STRING },
+                        t: { type: Type.NUMBER }, // topicNum
+                        s: { type: Type.NUMBER }, // score
+                        i: { type: Type.STRING }, // improvement
                     },
-                    required: ["topicNum", "score", "improvement"],
+                    required: ["t", "s", "i"],
                 },
             },
         },
-        required: ["analysis"],
+        required: ["a"],
     };
 
     // Retry logic for JSON parsing failures
@@ -596,7 +589,15 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
 
             const jsonText = cleanJsonOutput(response.text);
             const result = JSON.parse(jsonText);
-            return result as AnalysisResult;
+            
+            // Map minified keys back to full keys for application compatibility
+            return {
+                analysis: result.a.map((item: any) => ({
+                    topicNum: item.t,
+                    score: item.s,
+                    improvement: item.i
+                }))
+            };
 
         } catch (error) {
             console.warn(`Attempt ${attempt} to analyze paper failed (JSON Parse/Validation):`, error);
