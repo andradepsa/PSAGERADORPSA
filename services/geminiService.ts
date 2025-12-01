@@ -358,6 +358,24 @@ function stripLatexComments(text: string): string {
 }
 
 /**
+ * Extracts only the body content between \begin{document} and \end{document}
+ * to save tokens during analysis.
+ */
+function extractDocumentBody(latex: string): string {
+    const beginTag = '\\begin{document}';
+    const endTag = '\\end{document}';
+    const startIndex = latex.indexOf(beginTag);
+    const endIndex = latex.lastIndexOf(endTag);
+    
+    if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+        // Return content inside document environment, trimmed
+        return latex.substring(startIndex + beginTag.length, endIndex).trim();
+    }
+    // Fallback: if tags are not found or malformed, return the full (stripped) latex
+    return latex;
+}
+
+/**
  * Fetches papers from the Semantic Scholar API based on a query.
  * PROXIED to avoid CORS issues in the browser.
  * @param query The search query string (e.g., paper title).
@@ -520,7 +538,7 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
     const analysisTopicsList = ANALYSIS_TOPICS.map(t => `- Topic ${t.num} (${t.name}): ${t.desc}`).join('\n');
     const systemInstruction = `You are an expert academic reviewer AI. Your task is to perform a rigorous, objective, and multi-faceted analysis of a provided scientific paper written in LaTeX.
 
-    **Input:** You will receive the full LaTeX source code of a scientific paper and a list of analysis topics with numeric identifiers.
+    **Input:** You will receive the body content of a scientific paper and a list of analysis topics with numeric identifiers.
     
     **Task:**
     1.  Analyze the paper based on the provided quality criteria.
@@ -582,12 +600,18 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
     // Strip comments to reduce token usage
     const cleanPaper = stripLatexComments(paperContent);
 
+    // OPTIMIZATION: Context Stripping
+    // We only send the body content for analysis. The preamble (packages, settings) 
+    // is irrelevant for analyzing text quality and consumes unnecessary tokens.
+    const bodyOnlyPaper = extractDocumentBody(cleanPaper);
+
     // Retry logic for JSON parsing failures
     const MAX_PARSE_RETRIES = 3;
     
     for (let attempt = 1; attempt <= MAX_PARSE_RETRIES; attempt++) {
         try {
-            const response = await callModel(model, systemInstruction, cleanPaper, {
+            // Use bodyOnlyPaper instead of cleanPaper to save tokens
+            const response = await callModel(model, systemInstruction, bodyOnlyPaper, {
                 jsonOutput: true,
                 responseSchema: responseSchema
             });
@@ -654,6 +678,8 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
 
     // Strip comments to reduce input token usage, AI will rewrite content anyway
     const cleanPaper = stripLatexComments(paperContent);
+    // FOR IMPROVEMENT: We MUST send the full paper (including preamble) so the AI can return a complete, compilable document.
+    // The "Context Stripping" optimization is NOT applied here, as it would cause the AI to return only the body, breaking the LaTeX structure.
     const userPrompt = `Current Paper Content:\n\n${cleanPaper}\n\nImprovement Points:\n\n${improvementPoints}\n\nBased on the above improvement points, provide the complete, improved LaTeX source code for the paper.`;
 
     // FORCED OPTIMIZATION: Use flash model to save quota/tokens during improvement loop
