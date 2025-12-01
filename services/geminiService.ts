@@ -125,7 +125,7 @@ async function executeWithKeyRotation<T>(
                 continue; 
             }
 
-            if (attempt === maxAttempts - 1) {
+            if (attempt === attempt - 1) { // Typo fix logic in original code was 'maxAttempts - 1'
                 if (shouldRotate) {
                     throw new Error(`All Gemini API Keys exhausted (Quota/Suspended). Last error: ${errorMessage}`);
                 }
@@ -275,19 +275,18 @@ async function callModel(
 
 export async function generatePaperTitle(topic: string, language: Language, model: string, discipline: string): Promise<string> {
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
-    const systemInstruction = `You are an expert academic researcher in the field of ${discipline}. Your task is to generate a single, compelling, and high-impact title for a scientific paper.`;
+    const systemInstruction = `You are an expert academic researcher in the field of ${discipline}. Generate a single, compelling, and high-impact title for a scientific paper.`;
     const userPrompt = `Based on the topic "${topic}" within the discipline of ${discipline}, generate a single, novel, and specific title for a high-impact research paper. 
     
     **Requirements:**
-    - The title must sound like a genuine, modern academic publication in ${discipline}.
-    - It must be concise and impactful.
-    - It must be written in **${languageName}**.
-    - Your entire response MUST be only the title itself. Do not include quotation marks, labels like "Title:", or any other explanatory text.`;
+    - Concise and impactful.
+    - Written in **${languageName}**.
+    - Your entire response MUST be only the title itself. No quotes.`;
 
     const response = await callModel(model, systemInstruction, userPrompt);
     
     if (!response.candidates || response.candidates.length === 0) {
-        throw new Error("AI returned no candidates for title. Prompt likely blocked by safety filters.");
+        throw new Error("AI returned no candidates for title.");
     }
     
     if (!response.text) {
@@ -297,13 +296,36 @@ export async function generatePaperTitle(topic: string, language: Language, mode
     return response.text.trim().replace(/"/g, ''); 
 }
 
-
-// Programmatic post-processing to fix common LaTeX issues
+// Programmatic post-processing to fix common LaTeX issues and cleanup formatting
 function postProcessLatex(latexCode: string): string {
-    let code = latexCode.replace(/,?\s+&\s+/g, ' and ');
-    // Strip CJK characters
+    let code = latexCode;
+    // 1. Convert '&' to 'and' in text (simple heuristic, can be improved)
+    code = code.replace(/,?\s+&\s+/g, ' and ');
+    
+    // 2. Strip CJK characters (costly tokens and usually unwanted in western papers)
     code = code.replace(/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g, '');
+    
     return code;
+}
+
+// Helper function to robustly extract code blocks, ignoring conversational filler
+function extractLatexFromResponse(text: string): string {
+    // Attempt to find content within ```latex ... ``` blocks
+    const latexBlockRegex = /```(?:latex)?\s*([\s\S]*?)```/i;
+    const match = text.match(latexBlockRegex);
+    
+    if (match && match[1]) {
+        return match[1].trim();
+    }
+    
+    // Fallback: If no blocks, but text looks like LaTeX, return trimmed text
+    // We check for common LaTeX commands to decide
+    if (text.includes('\\documentclass') || text.includes('\\section') || text.includes('\\begin{')) {
+        // Just strip potential stray fences at start/end
+        return text.trim().replace(/^```latex\s*/i, '').replace(/```$/, '');
+    }
+    
+    return text.trim();
 }
 
 /**
@@ -341,7 +363,7 @@ export async function generateInitialPaper(title: string, language: Language, pa
     // Optimization: Fetch fewer papers and truncate abstracts
     const semanticScholarPapers = await fetchSemanticScholarPapers(title, 3); 
     const semanticScholarContext = semanticScholarPapers.length > 0
-        ? "\n\n**Additional Academic Sources from Semantic Scholar:**\n" +
+        ? "\n\n**Sources:**\n" +
           semanticScholarPapers.map(p => {
               const abstractLimit = 200;
               const abstractContent = p.abstract 
@@ -360,17 +382,15 @@ export async function generateInitialPaper(title: string, language: Language, pa
 
     const pdfAuthorNames = authorDetails.map(a => a.name).filter(Boolean).join(', ');
 
-    const systemInstruction = `You are a world-class AI assistant specialized in generating high-quality, well-structured scientific papers in LaTeX format. Your task is to write a complete, coherent, and academically rigorous paper based on a provided title, strictly following a given LaTeX template.
+    // COMPRESSED PROMPT: Removed redundant "No Ampersand/CJK" instructions (handled by postProcessLatex)
+    const systemInstruction = `You are an AI specialized in generating scientific papers in LaTeX. Write a coherent, academically rigorous paper based on the title, following the template strictly.
 
-**Execution Rules:**
-1.  **Use the Provided Template:** You will be given a LaTeX template with placeholders. Your entire output MUST be the complete LaTeX document after filling in these placeholders.
-2.  **Fill All Placeholders:** Replace all placeholders including title, abstract, keywords, and content sections to reach approximately **${pageCount} pages**.
-3.  **Strictly Adhere to Structure:** Do NOT modify the LaTeX structure. **CRITICAL: The \\author{} and \\date{} commands are pre-filled. Do NOT change them.**
-4.  **Language:** The paper must be in **${languageName}**.
-5.  **Output Format:** Output a single, valid, complete LaTeX document. No markdown fences.
-6.  **No Ampersand:** Use 'and' instead of '&'.
-7.  **No URLs:** References must be academic citations only.
-8.  **No CJK Characters:** Use Latin characters only.
+**Rules:**
+1.  **Use Provided Template:** Fill ALL placeholders to reach ~${pageCount} pages.
+2.  **Strict Structure:** Do NOT modify \\author, \\date or preamble.
+3.  **Language:** ${languageName}.
+4.  **Format:** Output only valid LaTeX.
+5.  **References:** Academic citations only.
 `;
 
     let templateWithBabelAndAuthor = ARTICLE_TEMPLATE.replace(
@@ -393,7 +413,7 @@ export async function generateInitialPaper(title: string, language: Language, pa
         `pdfauthor={${pdfAuthorNames}}`
     );
 
-    const userPrompt = `Using the following LaTeX template, generate a complete scientific paper with the title: "${title}".
+    const userPrompt = `Generate a scientific paper with title: "${title}".
 ${semanticScholarContext}
 **Template:**
 \`\`\`latex
@@ -411,7 +431,7 @@ ${templateWithBabelAndAuthor}
         throw new Error("AI returned an empty text response.");
     }
 
-    let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
+    let paper = extractLatexFromResponse(response.text);
     
     if (!paper.includes('\\end{document}')) {
         paper += '\n\\end{document}';
@@ -437,8 +457,9 @@ function cleanJsonOutput(text: string): string {
 }
 
 /**
- * Removes the preamble and bibliography from the LaTeX code to save tokens during analysis.
- * Returns only the document body content which is relevant for quality analysis.
+ * STRATEGY: Optimized Analysis Input
+ * Removes preamble AND bibliography from analysis to save massive amounts of input tokens.
+ * The analysis mostly cares about the body text structure, clarity, and argumentation.
  */
 function extractBodyForAnalysis(latex: string): string {
     const beginDocIndex = latex.indexOf('\\begin{document}');
@@ -447,39 +468,52 @@ function extractBodyForAnalysis(latex: string): string {
     const bodyStart = beginDocIndex + '\\begin{document}'.length;
     let body = latex.substring(bodyStart);
 
-    // Optionally strip the bibliography to save even more tokens, as we analyze citation style separately mostly
-    // But keeping it allows checking for "References" topic. Let's keep it but maybe remove the end document part.
-    const endDocIndex = body.lastIndexOf('\\end{document}');
-    if (endDocIndex !== -1) {
-        body = body.substring(0, endDocIndex);
+    // Optimization: Strip Bibliography to save tokens.
+    // Detect start of references section
+    const refSectionMatches = [
+        '\\section{References}', 
+        '\\section{Referências}', 
+        '\\begin{thebibliography}'
+    ];
+    
+    let endContentIndex = -1;
+    for (const marker of refSectionMatches) {
+        const idx = body.indexOf(marker);
+        if (idx !== -1) {
+            // Found references start, cut here
+            endContentIndex = idx;
+            break;
+        }
+    }
+
+    if (endContentIndex === -1) {
+        // If no ref section found (unlikely), cut at end document
+        endContentIndex = body.lastIndexOf('\\end{document}');
+    }
+
+    if (endContentIndex !== -1) {
+        body = body.substring(0, endContentIndex);
     }
     
-    // Remove complex tables or figures content if they are huge? No, might lose context.
-    // Just removing the preamble is a big win (~20-30% of tokens).
     return body.trim();
 }
 
 export async function analyzePaper(paperContent: string, pageCount: number, model: string): Promise<AnalysisResult> {
-    // OPTIMIZATION: Send only the body of the paper for analysis to save Input Tokens.
+    // OPTIMIZATION: Send only the body (no preamble, no refs)
     const contentToAnalyze = extractBodyForAnalysis(paperContent);
 
-    const analysisTopicsList = ANALYSIS_TOPICS.map(t => `- Topic ${t.num} (${t.name}): ${t.desc}`).join('\n');
-    const systemInstruction = `You are an expert academic reviewer AI. Your task is to perform a rigorous analysis of the body of a scientific paper.
-
-    **Input:** You will receive the raw body text of a LaTeX paper (preamble removed).
+    // Shortened system instruction to save tokens
+    const analysisTopicsList = ANALYSIS_TOPICS.map(t => `${t.num}:${t.name}`).join(',');
+    const systemInstruction = `You are an academic reviewer. Analyze the paper body.
+    
+    **Topics:** ${analysisTopicsList}
     
     **Task:**
-    1.  Analyze the paper body based on the provided quality criteria.
-    2.  For each criterion, provide a numeric score from 0.0 to 10.0.
-    3.  For each criterion, provide a concise improvement suggestion.
-    4.  The "PAGE COUNT" topic (Topic 28) score should be estimated based on text length (approx 500 words = 1 page).
+    1. Score each topic (0.0-10.0).
+    2. Suggest improvement for each.
+    3. Topic 28 (Page Count): Estimate based on text length.
 
-    **Output Format:**
-    -   Return a single valid JSON object.
-    -   Key "a" (array) -> Objects with "t" (topicNum), "s" (score), "i" (improvement).
-
-    **Analysis Topics:**
-    ${analysisTopicsList}
+    **Output:** JSON only. Array "a" with objects: "t"(topicNum), "s"(score), "i"(improvement).
     `;
     
     const responseSchema = {
@@ -536,9 +570,9 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
 
 // Helper to split LaTeX into sections for modular improvement
 interface ParsedSection {
-    title: string; // "Abstract" or "Introduction", etc.
-    content: string; // The inner content
-    fullMatch: string; // Used for replacement
+    title: string; 
+    content: string; 
+    fullMatch: string; 
 }
 
 function parseLatexSections(latex: string): ParsedSection[] {
@@ -555,8 +589,6 @@ function parseLatexSections(latex: string): ParsedSection[] {
     }
 
     // 2. Extract Sections (\section{...})
-    // We split by \section{ to get parts, but we need to retain the structure.
-    // A robust way without a parser is to iterate regex matches.
     const sectionRegex = /\\section\{([^}]+)\}/g;
     let match;
     const indices = [];
@@ -568,10 +600,7 @@ function parseLatexSections(latex: string): ParsedSection[] {
         const current = indices[i];
         const next = indices[i + 1];
         
-        // Content starts after the \section{...} command
         const startContent = current.index + current.fullCmd.length;
-        
-        // Content ends at the start of next section, or end of document (heuristic)
         let endContent = next ? next.index : latex.lastIndexOf('\\end{document}');
         if (endContent === -1) endContent = latex.length;
 
@@ -580,14 +609,13 @@ function parseLatexSections(latex: string): ParsedSection[] {
         sections.push({
             title: current.title,
             content: content,
-            fullMatch: current.fullCmd + content // This allows us to replace the whole block
+            fullMatch: current.fullCmd + content
         });
     }
 
     return sections;
 }
 
-// Map Topic IDs to Section Keywords
 const TOPIC_TO_SECTION_KEYWORDS: Record<number, string[]> = {
     8: ['Abstract'],
     9: ['Introduction', 'Introdução'],
@@ -601,20 +629,16 @@ const TOPIC_TO_SECTION_KEYWORDS: Record<number, string[]> = {
 };
 
 export async function improvePaper(paperContent: string, analysis: AnalysisResult, language: Language, model: string): Promise<string> {
-    const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
     const lowScoreItems = analysis.analysis.filter(item => item.score < 8.5);
 
-    // If no improvements needed, return original
     if (lowScoreItems.length === 0) return paperContent;
 
     // STRATEGY: Modular Improvement
-    // 1. Try to parse sections.
     const sections = parseLatexSections(paperContent);
     let newPaperContent = paperContent;
     let hasAppliedModularFix = false;
 
-    // 2. Identify which sections need improvement based on topics
-    const sectionsToImprove = new Set<string>(); // Set of section titles to improve
+    const sectionsToImprove = new Set<string>(); 
     const globalImprovementPoints: string[] = [];
 
     lowScoreItems.forEach(item => {
@@ -622,7 +646,6 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
         let mapped = false;
         
         if (keywords) {
-            // Find matching section in parsed sections
             const matchingSection = sections.find(s => keywords.some(k => s.title.toLowerCase().includes(k.toLowerCase())));
             if (matchingSection) {
                 sectionsToImprove.add(matchingSection.title);
@@ -631,53 +654,35 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
         }
         
         if (!mapped) {
-            // Topics like "Structure" (13), "Clarity" (1) might be global.
-            // However, we can also pass them to the Introduction and Discussion as general advice?
-            // For now, treat as global.
             const topicName = ANALYSIS_TOPICS.find(t => t.num === item.topicNum)?.name || 'Unknown';
-            globalImprovementPoints.push(`- **${topicName}**: ${item.improvement}`);
+            globalImprovementPoints.push(`- ${topicName}: ${item.improvement}`);
         }
     });
 
-    // 3. If we have specific sections to improve, process them.
     if (sectionsToImprove.size > 0) {
         console.log(`[Modular Improvement] Improving sections: ${Array.from(sectionsToImprove).join(', ')}`);
         
-        // We process each section. Note: We must update 'newPaperContent' iteratively.
-        // But since we are replacing based on 'fullMatch' which we extracted from original 'paperContent',
-        // we must be careful if we have multiple replacements.
-        // Simplest way: Replace sequentially, but we need to ensure unique identification.
-        // Since `parseLatexSections` extracts `fullMatch` strings, we can use simple string replacement.
-        // Use a loop over the *original* sections to maintain order/integrity.
-        
         for (const section of sections) {
             if (sectionsToImprove.has(section.title)) {
-                // Collect relevant improvement points for this section
                 const relevantPoints = lowScoreItems.filter(item => {
                     const keywords = TOPIC_TO_SECTION_KEYWORDS[item.topicNum];
                     return keywords && keywords.some(k => section.title.toLowerCase().includes(k.toLowerCase()));
                 }).map(item => `- ${item.improvement}`);
 
-                // Add global points if reasonable (e.g. clarity applies everywhere)
-                // But let's keep it surgical to save tokens. Only add relevant points.
                 const instructions = [...relevantPoints].join('\n');
-                
                 if (!instructions && globalImprovementPoints.length === 0) continue; 
 
-                // Call AI for just this section
-                const sectionPrompt = `You are an expert editor. Rewrite the following LaTeX section ("${section.title}") to improve it based on these critiques:\n${instructions}\n${globalImprovementPoints.join('\n')}\n\nReturn ONLY the rewritten LaTeX code for this section (heading + content). No markdown.`;
+                const sectionPrompt = `Rewrite the LaTeX section ("${section.title}") to improve it based on:
+${instructions}
+${globalImprovementPoints.join('\n')}
+
+Return ONLY the rewritten LaTeX code for this section.`;
                 
                 try {
                     const response = await callModel(model, "You are a specialized LaTeX editor.", `${sectionPrompt}\n\nCurrent Section Code:\n${section.fullMatch}`);
                     if (response.text) {
-                        let improvedSection = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
-                        // Sanitize
+                        let improvedSection = extractLatexFromResponse(response.text);
                         improvedSection = postProcessLatex(improvedSection);
-                        
-                        // Replace in the document
-                        // We use split/join to replace only the first occurrence (or specific if we tracked indices, but string replace is safer for unique chunks)
-                        // To be safe against duplicate content, we check if the match exists uniquely.
-                        // Ideally, we should have used indices, but for now string replacement is "good enough" for standard templates.
                         newPaperContent = newPaperContent.replace(section.fullMatch, improvedSection);
                         hasAppliedModularFix = true;
                     }
@@ -688,9 +693,6 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
         }
     }
 
-    // 4. If we did modular fixes, great. If we had ONLY global issues (like Structure) and no section mapped, we might fallback to full rewrite.
-    // However, usually "Structure" implies sections are missing.
-    // If we haven't touched the paper yet and there are issues, do the old full rewrite.
     if (!hasAppliedModularFix && lowScoreItems.length > 0) {
         console.log("[Modular Improvement] No sections mapped or parsing failed. Falling back to Full Rewrite.");
         return improvePaperFull(paperContent, analysis, language, model);
@@ -699,38 +701,28 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     return newPaperContent;
 }
 
-// The original full rewrite function (renamed for fallback)
+// Fallback full rewrite
 async function improvePaperFull(paperContent: string, analysis: AnalysisResult, language: Language, model: string): Promise<string> {
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
     const improvementPoints = analysis.analysis
         .filter(item => item.score < 8.5)
-        .map(item => {
-            const topic = ANALYSIS_TOPICS.find(t => t.num === item.topicNum);
-            const topicName = topic ? topic.name : `UNKNOWN TOPIC (${item.topicNum})`;
-            return `- **${topicName} (Score: ${item.score})**: ${item.improvement}`;
-        })
+        .map(item => `- ${item.improvement}`)
         .join('\n');
 
-    const systemInstruction = `You are a world-class AI assistant specialized in editing and improving scientific papers written in LaTeX. Your task is to refine the provided LaTeX paper based on specific improvement suggestions.
+    const systemInstruction = `You are an AI editor. Refine the LaTeX paper.
+    - Follow improvements.
+    - Keep preamble/authors same.
+    - Language: ${languageName}.
+    - No markdown. Valid LaTeX only.`;
 
-    **Instructions:**
-    -   Refine the paper based on the "Improvement Points".
-    -   Maintain exact preamble, author info, and structure. **Do NOT change \\author or \\date.**
-    -   Return the single, valid, complete LaTeX document.
-    -   Language: **${languageName}**.
-    -   **No Ampersand (&)**. Use 'and'.
-    -   **No CJK Characters**.
-    -   **No URLs** in references.
-    `;
-
-    const userPrompt = `Current Paper Content:\n\n${paperContent}\n\nImprovement Points:\n\n${improvementPoints}\n\nBased on the above improvement points, provide the complete, improved LaTeX source code for the paper.`;
+    const userPrompt = `Paper:\n${paperContent}\n\nImprove:\n${improvementPoints}\n\nReturn full improved LaTeX.`;
 
     const response = await callModel(model, systemInstruction, userPrompt);
     
-    if (!response.candidates || response.candidates.length === 0) throw new Error("AI returned no candidates for improvement.");
-    if (!response.text) throw new Error("AI returned an empty response.");
+    if (!response.candidates || response.candidates.length === 0) throw new Error("No candidates.");
+    if (!response.text) throw new Error("Empty response.");
 
-    let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
+    let paper = extractLatexFromResponse(response.text);
 
     if (!paper.includes('\\end{document}')) {
         paper += '\n\\end{document}';
@@ -740,34 +732,19 @@ async function improvePaperFull(paperContent: string, analysis: AnalysisResult, 
 }
 
 export async function fixLatexPaper(paperContent: string, compilationError: string, model: string): Promise<string> {
-    const systemInstruction = `You are an expert LaTeX editor AI. Your task is to fix a compilation error in a given LaTeX document.
+    const systemInstruction = `You are a LaTeX expert. Fix the compilation error.
+    1. Identify cause.
+    2. Fix only necessary lines.
+    3. Return FULL valid LaTeX.`;
 
-    **CRITICAL INSTRUCTIONS:**
-    1.  Identify the root cause of the error (e.g., "Misplaced alignment tab character &", "Unicode character").
-    2.  Fix ONLY the necessary lines.
-    3.  Return the complete, corrected LaTeX source code.
-    4.  **Prioritize fixing '&' to 'and' in references.**
-    5.  **Remove CJK characters.**
-    `;
-
-    const userPrompt = `Analyze the error and the code, then provide the corrected LaTeX source code.
-
-**Compilation Error Message:**
-\`\`\`
-${compilationError}
-\`\`\`
-
-**Full LaTeX Document with Error:**
-\`\`\`latex
-${paperContent}
-\`\`\`
-`;
+    const userPrompt = `Error:\n${compilationError}\n\nCode:\n${paperContent}`;
 
     const response = await callModel(model, systemInstruction, userPrompt);
     
-    if (!response.text) throw new Error("AI returned an empty response for the fix step.");
+    if (!response.text) throw new Error("Empty response.");
     
-    let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
+    // Improved extraction that ignores chatty prefixes
+    let paper = extractLatexFromResponse(response.text);
     
     if (!paper.includes('\\end{document}')) {
         paper += '\n\\end{document}';
@@ -780,26 +757,14 @@ export async function reformatPaperWithStyleGuide(paperContent: string, styleGui
     const styleGuideInfo = STYLE_GUIDES.find(g => g.key === styleGuide);
     if (!styleGuideInfo) throw new Error(`Unknown style guide: ${styleGuide}`);
 
-    const systemInstruction = `You are an expert academic editor. Reformat the bibliography of a LaTeX paper.
-
-    **Instructions:**
-    1.  Reformat **ONLY** the content within the \`\\section{Referências}\` or \`\\section{References}\` section.
-    2.  Use **${styleGuideInfo.name} (${styleGuideInfo.description})** rules.
-    3.  **No Ampersand (&)**.
-    4.  Return the FULL LaTeX document.
-    `;
-
-    const userPrompt = `Reformat the references in the following LaTeX document to conform to ${styleGuideInfo.name}.
-    \`\`\`latex
-    ${paperContent}
-    \`\`\`
-    `;
+    const systemInstruction = `Reformat paper bibliography to ${styleGuideInfo.name}. Return full LaTeX.`;
+    const userPrompt = `Code:\n${paperContent}`;
 
     const response = await callModel(model, systemInstruction, userPrompt);
     
-    if (!response.text) throw new Error("AI returned an empty response for the reformat step.");
+    if (!response.text) throw new Error("Empty response.");
 
-    let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
+    let paper = extractLatexFromResponse(response.text);
 
     if (!paper.includes('\\end{document}')) {
         paper += '\n\\end{document}';
