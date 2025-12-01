@@ -112,9 +112,6 @@ async function executeWithKeyRotation<T>(
     KeyManager.loadKeys(); 
 
     // We allow trying each key once before giving up entirely on this specific request.
-    const maxAttempts = KeyManager.keys.length > 0 ? KeyManager.keys.length : 1;
-    
-    // However, if we only have 1 key, we still want to retry transient errors a few times.
     // The inner retry logic inside `withRateLimitHandling` handles transient 500s/429s.
     // This outer loop handles "Hard Quota" or "Persistent 429" by switching keys.
     
@@ -158,6 +155,8 @@ async function executeWithKeyRotation<T>(
     
     throw new Error("All Gemini API Keys exhausted (Rotation loop ended without success).");
 }
+
+const maxAttempts = KeyManager.keys.length > 0 ? KeyManager.keys.length : 1;
 
 async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
     const MAX_RETRIES = 5; 
@@ -356,7 +355,7 @@ function postProcessLatex(latexCode: string): string {
  * @param limit The maximum number of papers to fetch.
  * @returns A promise that resolves to an array of SemanticScholarPaper objects.
  */
-async function fetchSemanticScholarPapers(query: string, limit: number = 3): Promise<SemanticScholarPaper[]> {
+async function fetchSemanticScholarPapers(query: string, limit: number = 5): Promise<SemanticScholarPaper[]> {
     try {
         const fields = 'paperId,title,authors,abstract,url'; // Requesting specific fields
         
@@ -391,16 +390,17 @@ export async function generateInitialPaper(title: string, language: Language, pa
     ).join('\n\n');
 
     // Fetch Semantic Scholar papers
-    // Optimized: Limit to 3 papers to save tokens and context window
+    // Otimização: Reduzido de 5 para 3 para economizar tokens
     const semanticScholarPapers = await fetchSemanticScholarPapers(title, 3); 
     const semanticScholarContext = semanticScholarPapers.length > 0
         ? "\n\n**Additional Academic Sources from Semantic Scholar (prioritize these for high-quality references):**\n" +
           semanticScholarPapers.map(p => {
-              // Optimized: Truncate abstracts to 400 chars to save tokens. The AI usually only needs the gist.
-              const abstractText = p.abstract 
-                ? (p.abstract.length > 400 ? p.abstract.substring(0, 400) + '...' : p.abstract) 
-                : 'N/A';
-              return `- Title: ${p.title}\n  Authors: ${p.authors.map(a => a.name).join(', ')}\n  Abstract: ${abstractText}\n  URL: ${p.url}`;
+              // Otimização: Truncar abstract para 300 caracteres
+              const abstractLimit = 300;
+              const abstractContent = p.abstract 
+                  ? (p.abstract.length > abstractLimit ? p.abstract.substring(0, abstractLimit) + "..." : p.abstract)
+                  : 'N/A';
+              return `- Title: ${p.title}\n  Authors: ${p.authors.map(a => a.name).join(', ')}\n  Abstract: ${abstractContent}\n  URL: ${p.url}`;
           }).join('\n---\n')
         : "";
 
