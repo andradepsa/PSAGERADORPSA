@@ -1,10 +1,8 @@
-
-
 import type { LanguageOption, AnalysisTopic, StyleGuideOption } from './types';
 
-// Otimização de Cota: Reduzido de 5 para 2.
-// Artigos longos consomem muitos tokens. 2 iterações são o equilíbrio ideal para contas gratuitas.
-export const TOTAL_ITERATIONS = 2;
+// Otimização de Cota: Reduzido para 1.
+// Artigos longos consomem muitos tokens. 1 iteração é o equilíbrio ideal para contas gratuitas.
+export const TOTAL_ITERATIONS = 1;
 
 export const LANGUAGES: LanguageOption[] = [
     { code: 'en', name: 'English', flag: '🇬🇧' },

@@ -656,7 +656,8 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     const cleanPaper = stripLatexComments(paperContent);
     const userPrompt = `Current Paper Content:\n\n${cleanPaper}\n\nImprovement Points:\n\n${improvementPoints}\n\nBased on the above improvement points, provide the complete, improved LaTeX source code for the paper.`;
 
-    const response = await callModel(model, systemInstruction, userPrompt);
+    // FORCED OPTIMIZATION: Use flash model to save quota/tokens during improvement loop
+    const response = await callModel('gemini-2.5-flash', systemInstruction, userPrompt);
     
     if (!response.candidates || response.candidates.length === 0) {
         throw new Error("AI returned no candidates for improvement.");
