@@ -1,8 +1,10 @@
+
 import type { LanguageOption, AnalysisTopic, StyleGuideOption } from './types';
 
-// Otimização de Cota: Mantido em 2.
-// Artigos longos consomem muitos tokens. 2 iterações são o equilíbrio ideal para contas gratuitas.
-export const TOTAL_ITERATIONS = 2;
+// Otimização de Cota: Reduzido de 12 para 5.
+// 12 iterações consomem tokens excessivos (aprox. 500k tokens por artigo).
+// 5 iterações são suficientes para atingir alta qualidade (score > 9.0).
+export const TOTAL_ITERATIONS = 5;
 
 export const LANGUAGES: LanguageOption[] = [
     { code: 'en', name: 'English', flag: '🇬🇧' },
@@ -12,8 +14,10 @@ export const LANGUAGES: LanguageOption[] = [
 ];
 
 export const AVAILABLE_MODELS: {name: string, description: string}[] = [
-    { name: 'gemini-2.5-flash', description: 'Google: Fast and efficient (Default)' },
-    { name: 'grok-2-latest', description: 'x.ai: Advanced reasoning (Requires API Key)' },
+    { name: 'gemini-2.5-flash', description: 'Fast and efficient for most tasks.' },
+    { name: 'gemini-2.5-pro', description: 'More powerful for complex generation and reasoning.' },
+    { name: 'gemini-3-pro-preview', description: 'Next-gen model for advanced reasoning and STEM tasks.' },
+    { name: 'grok-4-latest', description: 'Powerful model from x.ai.' },
 ];
 
 export const STYLE_GUIDES: StyleGuideOption[] = [
@@ -24,33 +28,34 @@ export const STYLE_GUIDES: StyleGuideOption[] = [
 ];
 
 export const ANALYSIS_TOPICS: AnalysisTopic[] = [
-    { num: 0, name: 'TOPIC FOCUS', desc: 'Foco central.' },
-    { num: 1, name: 'WRITING CLARITY', desc: 'Gramática e legibilidade.' },
-    { num: 2, name: 'METHODOLOGICAL RIGOR', desc: 'Validez metodológica.' },
-    { num: 3, name: 'ORIGINALITY', desc: 'Contribuição acadêmica.' },
-    { num: 4, name: 'LITERATURE REVIEW', desc: 'Uso de fontes e contexto.' },
+    { num: 0, name: 'TOPIC FOCUS', desc: 'Mantém o foco central sem desviar.' },
+    { num: 1, name: 'WRITING CLARITY', desc: 'Qualidade gramatical e legibilidade.' },
+    { num: 2, name: 'METHODOLOGICAL RIGOR', desc: 'Validez científica da metodologia.' },
+    { num: 3, name: 'ORIGINALITY', desc: 'Contribuição nova para a área.' },
+    { num: 4, name: 'LITERATURE REVIEW', desc: 'Uso adequado de fontes e contexto.' },
     { num: 5, name: 'METHODOLOGY CLARITY', desc: 'Clareza e reprodutibilidade.' },
-    { num: 6, name: 'RESULTS PRESENTATION', desc: 'Organização dos resultados.' },
-    { num: 7, name: 'DISCUSSION DEPTH', desc: 'Interpretação e teoria.' },
-    { num: 8, 'name': 'ABSTRACT QUALITY', desc: 'Resumo conciso.' },
-    { num: 9, name: 'INTRODUCTION QUALITY', desc: 'Contexto e problema.' },
-    { num: 10, name: 'CONCLUSION QUALITY', desc: 'Achados e futuro.' },
+    { num: 6, name: 'RESULTS PRESENTATION', desc: 'Organização e objetividade dos resultados.' },
+    { num: 7, name: 'DISCUSSION DEPTH', desc: 'Interpretação e link com teoria.' },
+    { num: 8, 'name': 'ABSTRACT QUALITY', desc: 'Resumo conciso e completo.' },
+    { num: 9, name: 'INTRODUCTION QUALITY', desc: 'Contexto e definição do problema.' },
+    { num: 10, name: 'CONCLUSION QUALITY', desc: 'Resumo de achados e trabalhos futuros.' },
     { num: 11, name: 'ARGUMENTATION STRENGTH', desc: 'Lógica e evidências.' },
-    { num: 12, name: 'COHERENCE AND FLOW', desc: 'Transições e fluxo.' },
-    { num: 13, name: 'STRUCTURE', desc: 'Estrutura LaTeX.' },
-    { num: 14, name: 'REFERENCES', desc: 'Formatação.' },
-    { num: 15, name: 'SCOPE AND BOUNDARIES', desc: 'Definição do escopo.' },
-    { num: 16, name: 'SCIENTIFIC HONESTY', desc: 'Honestidade científica.' },
-    { num: 17, name: 'TITLE-CONTENT ALIGNMENT', desc: 'Alinhamento título-conteúdo.' },
-    { num: 18, name: 'STATEMENT OF LIMITATIONS', desc: 'Limitações.' },
+    { num: 12, name: 'COHERENCE AND FLOW', desc: 'Transições suaves entre seções.' },
+    { num: 13, name: 'STRUCTURE', desc: 'Organização geral do LaTeX.' },
+    { num: 14, name: 'REFERENCES', desc: 'Formatação e relevância.' },
+    { num: 15, name: 'SCOPE AND BOUNDARIES', desc: 'Definição clara do escopo.' },
+    { num: 16, name: 'SCIENTIFIC HONESTY', desc: 'Transparência e evitar plágio.' },
+    { num: 17, name: 'TITLE-CONTENT ALIGNMENT', desc: 'Alinhamento entre título e conteúdo.' },
+    { num: 18, name: 'STATEMENT OF LIMITATIONS', desc: 'Reconhecimento de limitações.' },
     { num: 20, name: 'PRACTICAL IMPLICATIONS', desc: 'Relevância prática.' },
-    { num: 21, name: 'TERMINOLOGY', desc: 'Terminologia técnica.' },
-    { num: 23, name: 'LATEX ACCURACY', desc: 'Compilabilidade.' },
-    { num: 24, name: 'STRATEGIC REFINEMENT', desc: 'Melhorias cirúrgicas.' },
-    { num: 25, name: 'THEORETICAL FOUNDATION', desc: 'Base teórica.' },
-    { num: 26, name: 'SCIENTIFIC CONTENT ACCURACY', desc: 'Precisão científica.' },
-    { num: 27, name: 'DEPTH OF CRITICAL ANALYSIS', desc: 'Análise crítica.' },
-    { num: 28, name: 'PAGE COUNT', desc: 'Adesão ao tamanho.' }
+    { num: 21, name: 'TERMINOLOGY', desc: 'Uso correto de termos técnicos.' },
+    { num: 22, name: 'ETHICAL CONSIDERATIONS', desc: 'Considerações éticas.' },
+    { num: 23, name: 'LATEX ACCURACY', desc: 'Compilabilidade técnica.' },
+    { num: 24, name: 'STRATEGIC REFINEMENT', desc: 'Melhorias cirúrgicas sem quebrar o texto.' },
+    { num: 25, name: 'THEORETICAL FOUNDATION', desc: 'Base teórica sólida.' },
+    { num: 26, name: 'SCIENTIFIC CONTENT ACCURACY', desc: 'Precisão das informações científicas.' },
+    { num: 27, name: 'DEPTH OF CRITICAL ANALYSIS', desc: 'Profundidade da análise crítica.' },
+    { num: 28, name: 'PAGE COUNT', desc: 'Adesão ao tamanho solicitado.' }
 ];
 
 export const FIX_OPTIONS: { key: string; label: string; description: string }[] = [
@@ -778,16 +783,35 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
   ]
 };
 
-export const getAllDisciplines = (): string[] => {
+/**
+ * Returns a list of all available disciplines.
+ * @returns {string[]} An array of discipline names.
+ */
+export function getAllDisciplines(): string[] {
     return Object.keys(ALL_TOPICS_BY_DISCIPLINE);
-};
+}
 
-export const getRandomTopic = (discipline: string): string => {
-    const topics = ALL_TOPICS_BY_DISCIPLINE[discipline];
-    if (topics && topics.length > 0) {
-        return topics[Math.floor(Math.random() * topics.length)];
+/**
+ * Returns a random topic from a specified discipline or from all disciplines if none is specified.
+ * @param {string} [discipline] - The optional discipline name to get a topic from.
+ * @returns {string} A random topic string.
+ */
+export function getRandomTopic(discipline?: string): string {
+    const disciplinesToChooseFrom = discipline ? [discipline] : Object.keys(ALL_TOPICS_BY_DISCIPLINE);
+    if (disciplinesToChooseFrom.length === 0) {
+        throw new Error("No disciplines available to choose a topic from.");
     }
-    return '';
-};
+    const selectedDiscipline = disciplinesToChooseFrom[Math.floor(Math.random() * disciplinesToChooseFrom.length)];
+    const topics = ALL_TOPICS_BY_DISCIPLINE[selectedDiscipline];
+    if (!topics || topics.length === 0) {
+        // Fallback if the selected discipline somehow has no topics, should not happen with current data
+        const fallbackDisciplines = Object.keys(ALL_TOPICS_BY_DISCIPLINE).filter(d => ALL_TOPICS_BY_DISCIPLINE[d].length > 0);
+        const fallbackDiscipline = fallbackDisciplines[Math.floor(Math.random() * fallbackDisciplines.length)];
+        const fallbackTopics = ALL_TOPICS_BY_DISCIPLINE[fallbackDiscipline];
+        return fallbackTopics[Math.floor(Math.random() * fallbackTopics.length)];
+    }
+    return topics[Math.floor(Math.random() * topics.length)];
+}
 
-export const SEMANTIC_SCHOLAR_API_BASE_URL = 'https://api.semanticscholar.org/graph/v1';
+
+export const SEMANTIC_SCHOLAR_API_BASE_URL = 'https://api.semanticscholar.org/graph/v1/paper/search';

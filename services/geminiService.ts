@@ -1,10 +1,3 @@
-
-
-
-
-
-
-
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Language, AnalysisResult, PaperSource, StyleGuide, SemanticScholarPaper, PersonalData } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES, SEMANTIC_SCHOLAR_API_BASE_URL } from '../constants';
@@ -397,8 +390,8 @@ export async function generateInitialPaper(title: string, language: Language, pa
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
     const babelLanguage = BABEL_LANG_MAP[language];
 
-    // Reduced from 20 to 12 to save tokens and avoid quota limits while maintaining quality
-    const referenceCount = 12;
+    // Reduced from 20 to 10 to save tokens as requested by user
+    const referenceCount = 10;
 
     const referencePlaceholders = Array.from(
         { length: referenceCount },
