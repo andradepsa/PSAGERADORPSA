@@ -349,6 +349,17 @@ async function fetchSemanticScholarPapers(query: string, limit: number = 5): Pro
     }
 }
 
+// Helper to remove comments from LaTeX strings to save tokens
+function stripLatexComments(latex: string): string {
+    // 1. Remove comments starting with % (but not \%)
+    // This regex looks for % that isn't preceded by \
+    let cleaned = latex.replace(/(?<!\\)%.*/g, '');
+    
+    // 2. Collapse multiple blank lines into two
+    cleaned = cleaned.replace(/\n\s*\n\s*\n/g, '\n\n');
+    
+    return cleaned.trim();
+}
 
 export async function generateInitialPaper(title: string, language: Language, pageCount: number, model: string, authorDetails: PersonalData[]): Promise<{ paper: string, sources: PaperSource[] }> {
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
@@ -382,7 +393,10 @@ export async function generateInitialPaper(title: string, language: Language, pa
 
     const pdfAuthorNames = authorDetails.map(a => a.name).filter(Boolean).join(', ');
 
-    // COMPRESSED PROMPT: Removed redundant "No Ampersand/CJK" instructions (handled by postProcessLatex)
+    // TOKEN OPTIMIZATION: Clean the template of comments before interpolating
+    // This saves tokens sent to the prompt.
+    const cleanTemplate = stripLatexComments(ARTICLE_TEMPLATE);
+
     const systemInstruction = `You are an AI specialized in generating scientific papers in LaTeX. Write a coherent, academically rigorous paper based on the title, following the template strictly.
 
 **Rules:**
@@ -393,7 +407,7 @@ export async function generateInitialPaper(title: string, language: Language, pa
 5.  **References:** Academic citations only.
 `;
 
-    let templateWithBabelAndAuthor = ARTICLE_TEMPLATE.replace(
+    let templateWithBabelAndAuthor = cleanTemplate.replace(
         '% Babel package will be added dynamically based on language',
         `\\usepackage[${babelLanguage}]{babel}`
     ).replace(
@@ -462,11 +476,15 @@ function cleanJsonOutput(text: string): string {
  * The analysis mostly cares about the body text structure, clarity, and argumentation.
  */
 function extractBodyForAnalysis(latex: string): string {
-    const beginDocIndex = latex.indexOf('\\begin{document}');
-    if (beginDocIndex === -1) return latex; // Fallback if structure is broken
+    // Optimization: Remove comments first to clean up the string
+    const cleanLatex = stripLatexComments(latex);
+
+    const beginDocIndex = cleanLatex.indexOf('\\begin{document}');
+    // If structure is broken, try to use the raw clean latex, otherwise return as is
+    if (beginDocIndex === -1) return cleanLatex; 
 
     const bodyStart = beginDocIndex + '\\begin{document}'.length;
-    let body = latex.substring(bodyStart);
+    let body = cleanLatex.substring(bodyStart);
 
     // Optimization: Strip Bibliography to save tokens.
     // Detect start of references section
@@ -495,11 +513,15 @@ function extractBodyForAnalysis(latex: string): string {
         body = body.substring(0, endContentIndex);
     }
     
+    // Aggressive optimization: Remove \newpage, \vspace, \hspace to save more tokens
+    // These visual formatting commands are irrelevant for content analysis.
+    body = body.replace(/\\newpage/g, '').replace(/\\vspace\{[^}]+\}/g, '').replace(/\\hspace\{[^}]+\}/g, '');
+
     return body.trim();
 }
 
-export async function analyzePaper(paperContent: string, pageCount: number, model: string): Promise<AnalysisResult> {
-    // OPTIMIZATION: Send only the body (no preamble, no refs)
+export async function analyzePaper(paperContent: string, pageCount: number, model: string,): Promise<AnalysisResult> {
+    // OPTIMIZATION: Send only the body (no preamble, no refs, no comments)
     const contentToAnalyze = extractBodyForAnalysis(paperContent);
 
     // Shortened system instruction to save tokens
@@ -589,6 +611,7 @@ function parseLatexSections(latex: string): ParsedSection[] {
     }
 
     // 2. Extract Sections (\section{...})
+    // Improved Regex to avoid matching \section* inside comments or weird formatting
     const sectionRegex = /\\section\{([^}]+)\}/g;
     let match;
     const indices = [];
@@ -616,15 +639,31 @@ function parseLatexSections(latex: string): ParsedSection[] {
     return sections;
 }
 
+// Expanded mapping to ensure we can modularly improve almost everything,
+// reducing the chance of fallback to 'improvePaperFull'.
 const TOPIC_TO_SECTION_KEYWORDS: Record<number, string[]> = {
     8: ['Abstract'],
     9: ['Introduction', 'Introdução'],
+    17: ['Introduction', 'Introdução', 'Title'], // Title-Content Alignment
+    15: ['Introduction', 'Scope', 'Escopo'], // Scope and Boundaries
+    
     4: ['Literature', 'Review', 'Revisão', 'Related Work'],
+    25: ['Literature', 'Review', 'Revisão', 'Introduction'], // Theoretical Foundation
+    
     5: ['Method', 'Metodologia', 'Materials'],
-    2: ['Method', 'Metodologia', 'Materials'],
+    2: ['Method', 'Metodologia', 'Materials'], // Methodological Rigor
+    
     6: ['Result', 'Resultados'],
+    26: ['Result', 'Resultados', 'Discussion'], // Scientific Content Accuracy
+    
     7: ['Discussion', 'Discussão'],
+    11: ['Discussion', 'Discussão', 'Argumentation'], // Argumentation Strength
+    27: ['Discussion', 'Discussão'], // Depth of Critical Analysis
+    
     10: ['Conclusion', 'Conclusão'],
+    20: ['Conclusion', 'Conclusão', 'Discussion'], // Practical Implications
+    18: ['Conclusion', 'Limitation', 'Limitações'], // Limitations
+    
     14: ['References', 'Referências']
 };
 
@@ -646,6 +685,7 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
         let mapped = false;
         
         if (keywords) {
+            // Find section that matches keyword
             const matchingSection = sections.find(s => keywords.some(k => s.title.toLowerCase().includes(k.toLowerCase())));
             if (matchingSection) {
                 sectionsToImprove.add(matchingSection.title);
@@ -666,23 +706,29 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
             if (sectionsToImprove.has(section.title)) {
                 const relevantPoints = lowScoreItems.filter(item => {
                     const keywords = TOPIC_TO_SECTION_KEYWORDS[item.topicNum];
+                    // Include if section matches keywords OR if it's a global point being applied to this section for context
                     return keywords && keywords.some(k => section.title.toLowerCase().includes(k.toLowerCase()));
                 }).map(item => `- ${item.improvement}`);
 
+                // If this section has specific improvements, apply them. 
+                // We also pass global points as context, but emphasize specific points.
                 const instructions = [...relevantPoints].join('\n');
+                
+                // If there are no specific instructions for this section, skip (unless we want to apply global fixes everywhere)
                 if (!instructions && globalImprovementPoints.length === 0) continue; 
 
                 const sectionPrompt = `Rewrite the LaTeX section ("${section.title}") to improve it based on:
 ${instructions}
-${globalImprovementPoints.join('\n')}
+${globalImprovementPoints.length > 0 ? '\nGeneral Improvements to keep in mind:\n' + globalImprovementPoints.join('\n') : ''}
 
-Return ONLY the rewritten LaTeX code for this section.`;
+Return ONLY the rewritten LaTeX code for this section. Do NOT wrap in markdown blocks.`;
                 
                 try {
                     const response = await callModel(model, "You are a specialized LaTeX editor.", `${sectionPrompt}\n\nCurrent Section Code:\n${section.fullMatch}`);
                     if (response.text) {
                         let improvedSection = extractLatexFromResponse(response.text);
                         improvedSection = postProcessLatex(improvedSection);
+                        // Safe replacement: Ensure we replace the exact original string
                         newPaperContent = newPaperContent.replace(section.fullMatch, improvedSection);
                         hasAppliedModularFix = true;
                     }
@@ -693,6 +739,8 @@ Return ONLY the rewritten LaTeX code for this section.`;
         }
     }
 
+    // Only fallback to full rewrite if we had LOW scores but couldn't apply ANY modular fix.
+    // This dramatically reduces the chance of expensive full-text generation.
     if (!hasAppliedModularFix && lowScoreItems.length > 0) {
         console.log("[Modular Improvement] No sections mapped or parsing failed. Falling back to Full Rewrite.");
         return improvePaperFull(paperContent, analysis, language, model);
