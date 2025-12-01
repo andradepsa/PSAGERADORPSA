@@ -1,5 +1,8 @@
 
 
+
+
+
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Language, AnalysisResult, PaperSource, StyleGuide, SemanticScholarPaper, PersonalData } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES, SEMANTIC_SCHOLAR_API_BASE_URL } from '../constants';
@@ -384,10 +387,8 @@ export async function generateInitialPaper(title: string, language: Language, pa
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
     const babelLanguage = BABEL_LANG_MAP[language];
 
-    let referenceCount = 20;
-    if (pageCount === 30) referenceCount = 40;
-    else if (pageCount === 60) referenceCount = 60;
-    else if (pageCount === 100) referenceCount = 100;
+    // Fixed to 20 references max as per requirement
+    const referenceCount = 20;
 
     const referencePlaceholders = Array.from(
         { length: referenceCount },

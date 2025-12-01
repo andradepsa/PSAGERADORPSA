@@ -1,5 +1,3 @@
-
-
 import React, { useState, useEffect, useRef } from 'react';
 import { generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide } from './services/geminiService';
 import type { Language, IterationAnalysis, PaperSource, AnalysisResult, StyleGuide, ArticleEntry, PersonalData } from './types';
@@ -47,6 +45,7 @@ const App: React.FC = () => {
     const [language, setLanguage] = useState<Language>('en');
     const [generationModel, setGenerationModel] = useState('gemini-2.5-flash');
     const [analysisModel, setAnalysisModel] = useState('gemini-2.5-flash');
+    // REMOVIDAS AS OPÇÕES DE 30, 60, 100 PAGINAS. PADRÃO FIXO EM 12.
     const [pageCount, setPageCount] = useState(12);
     const [isGenerating, setIsGenerating] = useState(false);
     const [generationProgress, setGenerationProgress] = useState(0);
@@ -341,7 +340,7 @@ const App: React.FC = () => {
 
     const handleFullAutomation = async (batchSizeOverride?: number) => {
         // Important: In Continuous Mode, we default to a batch size of 1 to allow for cooldowns between papers.
-        // This prevents the "Quota Exhausted" error caused by processing 7 papers (1.5M tokens) simultaneously.
+        // This ensures "GERAR APENAS UM ARTIGO POR VEZ" as requested.
         const articlesToProcess = batchSizeOverride ?? (isContinuousMode ? 1 : numberOfArticles);
         const storedToken = localStorage.getItem('zenodo_api_key');
         if (!storedToken) {
@@ -523,14 +522,15 @@ const App: React.FC = () => {
                 return "❌ Automação cancelada pelo usuário."; // Default manual cancellation message
             });
         } else if (isContinuousMode) {
-            setGenerationStatus(`✅ Artigo concluído. Pausa estratégica de 60s para recuperar cota da API...`);
+            setGenerationStatus(`✅ Ciclo concluído. Pausa de 1 minuto antes do próximo artigo (Modo Contínuo)...`);
             setTimeout(() => {
                 // Double-check flags before re-starting
                 if (isContinuousMode && !isGenerationCancelled.current) {
                     // Start next cycle with just 1 article to keep cooldowns active
+                    // This STRICTLY ensures "GERAR APENAS UM ARTIGO POR VEZ" is followed in the recursion
                     handleFullAutomation(1);
                 }
-            }, 60000); // Increased to 60 seconds wait
+            }, 60000); // STRICTLY 60 seconds (1 minute) pause
         } else {
             // This is for a normal, single batch completion
             setGenerationProgress(100);
@@ -991,7 +991,7 @@ const App: React.FC = () => {
                                 <LanguageSelector languages={LANGUAGES} selectedLanguage={language} onSelect={setLanguage} />
                                 <ModelSelector models={AVAILABLE_MODELS} selectedModel={analysisModel} onSelect={setAnalysisModel} label="Modelo Rápido (para análise e título):" />
                                 <ModelSelector models={AVAILABLE_MODELS} selectedModel={generationModel} onSelect={setGenerationModel} label="Modelo Poderoso (para geração e melhoria):" />
-                                <PageSelector options={[12, 30, 60, 100]} selectedPageCount={pageCount} onSelect={setPageCount} />
+                                <PageSelector options={[12]} selectedPageCount={pageCount} onSelect={setPageCount} />
                                 <div>
                                     <label htmlFor="discipline-select" className="font-semibold block mb-2">Disciplina para Geração de Título:</label>
                                     <select
