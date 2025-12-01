@@ -1,8 +1,3 @@
-
-
-
-
-
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Language, AnalysisResult, PaperSource, StyleGuide, SemanticScholarPaper, PersonalData } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES, SEMANTIC_SCHOLAR_API_BASE_URL } from '../constants';
@@ -361,7 +356,7 @@ function postProcessLatex(latexCode: string): string {
  * @param limit The maximum number of papers to fetch.
  * @returns A promise that resolves to an array of SemanticScholarPaper objects.
  */
-async function fetchSemanticScholarPapers(query: string, limit: number = 5): Promise<SemanticScholarPaper[]> {
+async function fetchSemanticScholarPapers(query: string, limit: number = 3): Promise<SemanticScholarPaper[]> {
     try {
         const fields = 'paperId,title,authors,abstract,url'; // Requesting specific fields
         
@@ -396,12 +391,17 @@ export async function generateInitialPaper(title: string, language: Language, pa
     ).join('\n\n');
 
     // Fetch Semantic Scholar papers
-    const semanticScholarPapers = await fetchSemanticScholarPapers(title, 5); // Fetch top 5 relevant papers
+    // Optimized: Limit to 3 papers to save tokens and context window
+    const semanticScholarPapers = await fetchSemanticScholarPapers(title, 3); 
     const semanticScholarContext = semanticScholarPapers.length > 0
         ? "\n\n**Additional Academic Sources from Semantic Scholar (prioritize these for high-quality references):**\n" +
-          semanticScholarPapers.map(p => 
-              `- Title: ${p.title}\n  Authors: ${p.authors.map(a => a.name).join(', ')}\n  Abstract: ${p.abstract || 'N/A'}\n  URL: ${p.url}`
-          ).join('\n---\n')
+          semanticScholarPapers.map(p => {
+              // Optimized: Truncate abstracts to 400 chars to save tokens. The AI usually only needs the gist.
+              const abstractText = p.abstract 
+                ? (p.abstract.length > 400 ? p.abstract.substring(0, 400) + '...' : p.abstract) 
+                : 'N/A';
+              return `- Title: ${p.title}\n  Authors: ${p.authors.map(a => a.name).join(', ')}\n  Abstract: ${abstractText}\n  URL: ${p.url}`;
+          }).join('\n---\n')
         : "";
 
     // Generate LaTeX author block for multiple authors
