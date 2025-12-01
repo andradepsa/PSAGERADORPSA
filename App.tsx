@@ -222,7 +222,9 @@ const App: React.FC = () => {
 
             schedulerTimeoutRef.current = window.setTimeout(() => {
                 console.log("Scheduler triggered! Starting automatic run...");
-                if (!isGenerating) handleFullAutomation(7);
+                // Start with 1 article, continuous mode will handle the loop if enabled,
+                // otherwise it's just 1 scheduled article.
+                if (!isGenerating) handleFullAutomation(1); 
                 scheduleNextRun();
             }, delay);
         };
@@ -1014,7 +1016,14 @@ const App: React.FC = () => {
                                 </div>
                             </div>
                             <div className="mt-6 text-center">
-                                <ActionButton onClick={() => handleFullAutomation()} disabled={isGenerating} isLoading={isGenerating} text={`Iniciar Automação (${isContinuousMode || isSchedulerEnabled ? 7 : numberOfArticles} Artigo${(isContinuousMode || isSchedulerEnabled ? 7 : numberOfArticles) > 1 ? 's' : ''})`} loadingText="Em Progresso..." completed={isGenerationComplete} />
+                                <ActionButton 
+                                    onClick={() => handleFullAutomation()} 
+                                    disabled={isGenerating} 
+                                    isLoading={isGenerating} 
+                                    text={isContinuousMode ? "Iniciar Automação Contínua (1 por vez)" : `Iniciar Automação (${numberOfArticles} Artigo${numberOfArticles > 1 ? 's' : ''})`}
+                                    loadingText="Em Progresso..." 
+                                    completed={isGenerationComplete} 
+                                />
                                 {isGenerating && (<button onClick={() => { isGenerationCancelled.current = true; setGenerationStatus("🔄 Cancelando após o artigo atual..."); }} className="btn bg-red-600 text-white hover:bg-red-700 mt-4">Cancelar Automação</button>)}
                             </div>
                             
@@ -1022,7 +1031,7 @@ const App: React.FC = () => {
                                 <div>
                                     <h4 className="font-semibold text-center mb-2 text-gray-700">Automação Contínua (Loop)</h4>
                                     <div className="flex items-center justify-center gap-2"><span className={`font-semibold transition-colors ${!isContinuousMode ? 'text-indigo-600' : 'text-gray-500'}`}>Off</span><label htmlFor="continuousToggle" className="relative inline-flex items-center cursor-pointer"><input type="checkbox" checked={isContinuousMode} onChange={handleToggleContinuousMode} id="continuousToggle" className="sr-only peer" /><div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div></label><span className={`font-semibold transition-colors ${isContinuousMode ? 'text-indigo-600' : 'text-gray-500'}`}>On</span></div>
-                                    <p className="text-center text-xs text-gray-500 mt-1">Gera artigos continuamente com pausas.</p>
+                                    <p className="text-center text-xs text-gray-500 mt-1">Gera um artigo por vez continuamente, com pausas de 1 minuto.</p>
                                 </div>
                                  <div>
                                     <h4 className="font-semibold text-center mb-2 text-gray-700">Agendamento Automático</h4>
