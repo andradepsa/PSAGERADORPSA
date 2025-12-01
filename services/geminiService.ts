@@ -352,8 +352,8 @@ async function fetchSemanticScholarPapers(query: string, limit: number = 5): Pro
 // Helper to remove comments from LaTeX strings to save tokens
 function stripLatexComments(latex: string): string {
     // 1. Remove comments starting with % (but not \%)
-    // This regex looks for % that isn't preceded by \
-    let cleaned = latex.replace(/(?<!\\)%.*/g, '');
+    // Matches % at start of line OR % preceded by non-backslash char
+    let cleaned = latex.replace(/(^|[^\\])%.*/g, '$1');
     
     // 2. Collapse multiple blank lines into two
     cleaned = cleaned.replace(/\n\s*\n\s*\n/g, '\n\n');
@@ -476,46 +476,44 @@ function cleanJsonOutput(text: string): string {
  * The analysis mostly cares about the body text structure, clarity, and argumentation.
  */
 function extractBodyForAnalysis(latex: string): string {
-    // Optimization: Remove comments first to clean up the string
+    // 1. Remove comments
     const cleanLatex = stripLatexComments(latex);
 
+    // 2. Remove Preamble
     const beginDocIndex = cleanLatex.indexOf('\\begin{document}');
-    // If structure is broken, try to use the raw clean latex, otherwise return as is
-    if (beginDocIndex === -1) return cleanLatex; 
+    let body = beginDocIndex !== -1 ? cleanLatex.substring(beginDocIndex + '\\begin{document}'.length) : cleanLatex;
 
-    const bodyStart = beginDocIndex + '\\begin{document}'.length;
-    let body = cleanLatex.substring(bodyStart);
-
-    // Optimization: Strip Bibliography to save tokens.
-    // Detect start of references section
+    // 3. Truncate Bibliography (keep header and first ~1000 chars to verify existence, but skip the rest)
     const refSectionMatches = [
         '\\section{References}', 
         '\\section{Referências}', 
         '\\begin{thebibliography}'
     ];
     
-    let endContentIndex = -1;
+    let refStartIndex = -1;
     for (const marker of refSectionMatches) {
-        const idx = body.indexOf(marker);
-        if (idx !== -1) {
-            // Found references start, cut here
-            endContentIndex = idx;
-            break;
+        refStartIndex = body.indexOf(marker);
+        if (refStartIndex !== -1) break;
+    }
+
+    if (refStartIndex !== -1) {
+        // Keep the section header + 1000 chars of references, then truncate
+        const cutOff = refStartIndex + 1000;
+        if (body.length > cutOff) {
+            body = body.substring(0, cutOff) + '\n\n... [Bibliography truncated for analysis] ...\n\\end{document}';
         }
-    }
-
-    if (endContentIndex === -1) {
-        // If no ref section found (unlikely), cut at end document
-        endContentIndex = body.lastIndexOf('\\end{document}');
-    }
-
-    if (endContentIndex !== -1) {
-        body = body.substring(0, endContentIndex);
+    } else {
+        // If no reference section, strip end document just to be clean
+         const endDocIndex = body.lastIndexOf('\\end{document}');
+         if (endDocIndex !== -1) {
+             body = body.substring(0, endDocIndex + '\\end{document}'.length);
+         }
     }
     
-    // Aggressive optimization: Remove \newpage, \vspace, \hspace to save more tokens
-    // These visual formatting commands are irrelevant for content analysis.
-    body = body.replace(/\\newpage/g, '').replace(/\\vspace\{[^}]+\}/g, '').replace(/\\hspace\{[^}]+\}/g, '');
+    // 4. Remove expensive visual formatting commands
+    body = body.replace(/\\newpage/g, '')
+               .replace(/\\vspace\{[^}]+\}/g, '')
+               .replace(/\\hspace\{[^}]+\}/g, '');
 
     return body.trim();
 }
@@ -664,7 +662,7 @@ const TOPIC_TO_SECTION_KEYWORDS: Record<number, string[]> = {
     20: ['Conclusion', 'Conclusão', 'Discussion'], // Practical Implications
     18: ['Conclusion', 'Limitation', 'Limitações'], // Limitations
     
-    14: ['References', 'Referências']
+    14: ['References', 'Referências', 'Bibliography']
 };
 
 export async function improvePaper(paperContent: string, analysis: AnalysisResult, language: Language, model: string): Promise<string> {
