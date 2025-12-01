@@ -3,6 +3,8 @@
 
 
 
+
+
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Language, AnalysisResult, PaperSource, StyleGuide, SemanticScholarPaper, PersonalData } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES, SEMANTIC_SCHOLAR_API_BASE_URL } from '../constants';
@@ -355,6 +357,14 @@ function postProcessLatex(latexCode: string): string {
 }
 
 /**
+ * Strips comments from LaTeX code to save tokens.
+ * Matches '%' that are at the start of a line OR not preceded by a backslash.
+ */
+function stripLatexComments(text: string): string {
+    return text.replace(/(^|[^\\])%.*$/gm, '$1').trim();
+}
+
+/**
  * Fetches papers from the Semantic Scholar API based on a query.
  * PROXIED to avoid CORS issues in the browser.
  * @param query The search query string (e.g., paper title).
@@ -387,8 +397,8 @@ export async function generateInitialPaper(title: string, language: Language, pa
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
     const babelLanguage = BABEL_LANG_MAP[language];
 
-    // Fixed to 20 references max as per requirement
-    const referenceCount = 20;
+    // Reduced from 20 to 12 to save tokens and avoid quota limits while maintaining quality
+    const referenceCount = 12;
 
     const referencePlaceholders = Array.from(
         { length: referenceCount },
@@ -576,12 +586,15 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
         required: ["analysis"],
     };
 
+    // Strip comments to reduce token usage
+    const cleanPaper = stripLatexComments(paperContent);
+
     // Retry logic for JSON parsing failures
     const MAX_PARSE_RETRIES = 3;
     
     for (let attempt = 1; attempt <= MAX_PARSE_RETRIES; attempt++) {
         try {
-            const response = await callModel(model, systemInstruction, paperContent, {
+            const response = await callModel(model, systemInstruction, cleanPaper, {
                 jsonOutput: true,
                 responseSchema: responseSchema
             });
@@ -646,7 +659,9 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     -   Focus on improving aspects directly related to the provided feedback. Do not introduce new content unless necessary to address a critique.
     `;
 
-    const userPrompt = `Current Paper Content:\n\n${paperContent}\n\nImprovement Points:\n\n${improvementPoints}\n\nBased on the above improvement points, provide the complete, improved LaTeX source code for the paper.`;
+    // Strip comments to reduce input token usage, AI will rewrite content anyway
+    const cleanPaper = stripLatexComments(paperContent);
+    const userPrompt = `Current Paper Content:\n\n${cleanPaper}\n\nImprovement Points:\n\n${improvementPoints}\n\nBased on the above improvement points, provide the complete, improved LaTeX source code for the paper.`;
 
     const response = await callModel(model, systemInstruction, userPrompt);
     
