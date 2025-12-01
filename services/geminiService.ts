@@ -496,6 +496,7 @@ export async function generateInitialPaper(title: string, language: Language, pa
 8.  **CRITICAL RULE - NO URLs:** References must **NOT** contain any URLs or web links. Format them as academic citations only, without any \`\\url{}\` commands.
 9.  **CRITICAL RULE - NO CJK CHARACTERS:** Do **NOT** use Chinese, Japanese, or Korean characters (like 霸, ba) in the document. The compiler strictly supports Latin characters only. If a term is inherently Asian, use its Pinyin or Romanized transliteration instead (e.g., use "Ba" instead of the character).
 10. **CRITICAL RULE - METADATA:** Do NOT place complex content inside the \`\\hypersetup{...}\` command. Only the title and author should be there.
+11. **CRITICAL RULE - NO PLACEHOLDERS:** You must REPLACE the placeholder text (e.g. "[INSERT NEW CONTENT...]") with the actual generated content. Do NOT output the placeholder string itself.
 `;
 
     // Dynamically insert the babel package and reference placeholders into the template for the prompt
@@ -642,6 +643,11 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
     // Strip comments to reduce token usage
     const cleanPaper = stripLatexComments(paperContent);
 
+    // CRITICAL FIX: Detect ungenerated placeholders in the FULL content BEFORE stripping context.
+    // If the strategic extraction removes the middle sections (where the placeholders usually are),
+    // the AI won't see them and will give a high score, ending the loop prematurely.
+    const hasUnfilledPlaceholders = cleanPaper.includes('[INSERT NEW CONTENT');
+
     // OPTIMIZATION: Context Stripping / Strategic Extraction
     // We only send the Abstract, Introduction and Conclusion for analysis to save massive tokens.
     // The middleware is assumed good if the "bookends" (Intro/Conclusion) are solid.
@@ -675,8 +681,28 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
             }
 
             const jsonText = cleanJsonOutput(response.text);
-            const result = JSON.parse(jsonText);
-            return result as AnalysisResult;
+            const result = JSON.parse(jsonText) as AnalysisResult;
+
+            // POST-ANALYSIS OVERRIDE
+            // If we detected placeholders in the full text, we MUST force the "Improvement" step.
+            // We overwrite the score for Topic 13 (Structure) to ensure the Editor AI fixes it.
+            if (hasUnfilledPlaceholders) {
+                console.warn("⚠️ Placeholder detected in content. Forcing score downgrade.");
+                const structureTopicIndex = result.analysis.findIndex(a => a.topicNum === 13);
+                const placeholderCritique = {
+                    topicNum: 13,
+                    score: 2.0,
+                    improvement: "CRITICAL: The document contains unfinished template placeholders (e.g., [INSERT NEW CONTENT...]). You MUST generate the missing content for these sections immediately."
+                };
+
+                if (structureTopicIndex !== -1) {
+                    result.analysis[structureTopicIndex] = placeholderCritique;
+                } else {
+                    result.analysis.push(placeholderCritique);
+                }
+            }
+
+            return result;
 
         } catch (error) {
             console.warn(`Attempt ${attempt} to analyze paper failed (JSON Parse/Validation):`, error);
@@ -723,6 +749,7 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     -   **Do NOT add or remove \`\\newpage\` commands. Let the LaTeX engine handle page breaks automatically.**
     -   **Crucially, do NOT include any images, figures, organograms, flowcharts, diagrams, or complex tables in the improved paper.**
     -   **CRITICAL: Ensure that no URLs or web links are present in the references section. All references must be formatted as academic citations only, without any \\url{} commands or direct links.**
+    -   **CRITICAL: CHECK FOR PLACEHOLDERS.** Scan the document for any remaining template placeholders like "[INSERT NEW CONTENT...]" or "[INSERT REFERENCE...]". If found, you MUST generate and insert the missing content immediately, regardless of the other feedback points.
     -   Focus on improving aspects directly related to the provided feedback. Do not introduce new content unless necessary to address a critique.
     `;
 
