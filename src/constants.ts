@@ -1,4 +1,5 @@
 
+
 import type { LanguageOption, AnalysisTopic, StyleGuideOption } from './types';
 
 // Otimização de Cota: Mantido em 2.
@@ -46,7 +47,6 @@ export const ANALYSIS_TOPICS: AnalysisTopic[] = [
     { num: 18, name: 'STATEMENT OF LIMITATIONS', desc: 'Reconhecimento de limitações.' },
     { num: 20, name: 'PRACTICAL IMPLICATIONS', desc: 'Relevância prática.' },
     { num: 21, name: 'TERMINOLOGY', desc: 'Uso correto de termos técnicos.' },
-    { num: 22, name: 'ETHICAL CONSIDERATIONS', desc: 'Considerações éticas.' },
     { num: 23, name: 'LATEX ACCURACY', desc: 'Compilabilidade técnica.' },
     { num: 24, name: 'STRATEGIC REFINEMENT', desc: 'Melhorias cirúrgicas sem quebrar o texto.' },
     { num: 25, name: 'THEORETICAL FOUNDATION', desc: 'Base teórica sólida.' },
