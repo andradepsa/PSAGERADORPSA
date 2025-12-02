@@ -17,7 +17,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ models, selectedModel, on
     return (
         <div className="my-6">
             <label className="block text-lg font-semibold text-gray-700 mb-3 text-center sm:text-left">{label}</label>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <div className="flex flex-col sm:flex-row flex-wrap gap-4 justify-center">
                 {models.map((model) => (
                     <button
                         key={model.name}

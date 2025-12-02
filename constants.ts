@@ -12,6 +12,8 @@ export const LANGUAGES: LanguageOption[] = [
 ];
 
 export const AVAILABLE_MODELS: {name: string, description: string}[] = [
+    { name: 'gemini-2.0-flash-15', description: 'Gemini 2.0 Flash (1M context, 200 RPM).' },
+    { name: 'gemini-2.0-flash-lite-30', description: 'Gemini 2.0 Flash-Lite (1M context, 200 RPM).' },
     { name: 'gemini-2.5-flash', description: 'Fast and efficient for most tasks.' },
     { name: 'gemini-2.5-pro', description: 'More powerful for complex generation and reasoning.' },
     { name: 'gemini-3-pro-preview', description: 'Next-gen model for advanced reasoning and STEM tasks.' },
