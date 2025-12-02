@@ -742,8 +742,7 @@ ${improvementPoints}
 
 Task: Return the COMPLETE, IMPROVED body starting with \\begin{document}.`;
 
-    // FORCED OPTIMIZATION: Use flash model to save quota/tokens during improvement loop
-    const response = await callModel('gemini-2.5-flash', systemInstruction, userPrompt);
+    const response = await callModel(model, systemInstruction, userPrompt);
     
     if (!response.candidates || response.candidates.length === 0) {
         throw new Error("AI returned no candidates for improvement.");

@@ -12,10 +12,10 @@ export const LANGUAGES: LanguageOption[] = [
 ];
 
 export const AVAILABLE_MODELS: {name: string, description: string}[] = [
-    { name: 'gemini-2.5-flash', description: 'Fast and efficient for most tasks.' },
-    { name: 'gemini-2.5-pro', description: 'More powerful for complex generation and reasoning.' },
-    { name: 'gemini-3-pro-preview', description: 'Next-gen model for advanced reasoning and STEM tasks.' },
-    { name: 'grok-4-latest', description: 'Powerful model from x.ai.' },
+    { name: 'gemini-flash-lite-latest', description: 'Google: Very fast, for simple tasks & high volume.' },
+    { name: 'gemini-2.5-flash', description: 'Google: Fast and efficient for most tasks.' },
+    { name: 'gemini-3-pro-preview', description: 'Google: Most powerful for complex generation and reasoning.' },
+    { name: 'grok-4-latest', description: 'x.ai: Powerful alternative model.' },
 ];
 
 export const STYLE_GUIDES: StyleGuideOption[] = [
@@ -703,7 +703,7 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
     "  - Ironia e anti-herói",
     "  - Rejeição da linearidade narrativa",
 
-    "XI. LITERATURA CONTEMPORÂNEA (1945–ATUAL)",
+    "XI. LITERATURA CONTEMPORânea (1945–ATUAL)",
     "- 1. Pós-modernismo e metanarrativas",
     "- 2. Realismo mágico e neofantástico (García Márquez, Cortázar, Allende)",
     "- 3. Literatura existencialista (Sartre, Camus)",
