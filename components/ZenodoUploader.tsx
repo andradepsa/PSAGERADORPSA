@@ -78,22 +78,22 @@ const ZenodoUploader = forwardRef<ZenodoUploaderRef, ZenodoUploaderProps>(({
             }
             const deposition = await dep_res.json();
             const depositionId = deposition.id;
-            const filesUrl = deposition.links.files;
-            if (!filesUrl) {
-                throw new Error('Could not find the file upload URL in the Zenodo API response.');
+            
+            const bucketUrl = deposition.links.bucket;
+            if (!bucketUrl) {
+                throw new Error('Could not find the bucket upload URL in the Zenodo API response.');
             }
             log(`Deposition created successfully. ID: ${depositionId}`);
 
-            // Step 2: Upload the file
-            log(`Step 2: Uploading file "${compiledPdfFile.name}"...`);
-            const formData = new FormData();
-            formData.append('file', compiledPdfFile, compiledPdfFile.name);
-
-            // Use the file upload URL, passed through proxy
-            const file_res = await fetch(proxied(filesUrl), {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${zenodoToken}` }, // Content-Type is not needed with FormData
-                body: formData
+            // Step 2: Upload the file to the bucket URL
+            log(`Step 2: Uploading file "${compiledPdfFile.name}" to bucket...`);
+            const file_res = await fetch(proxied(`${bucketUrl}/${compiledPdfFile.name}`), {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${zenodoToken}`,
+                    'Content-Type': 'application/octet-stream'
+                },
+                body: compiledPdfFile
             });
 
             if (!file_res.ok) {

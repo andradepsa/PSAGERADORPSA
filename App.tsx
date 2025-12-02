@@ -443,12 +443,22 @@ const App: React.FC = () => {
                         if (!createResponse.ok) throw new Error(`Erro ${createResponse.status} ao criar depósito.`);
                         const deposit = await createResponse.json();
                         
-                        const formData = new FormData();
-                        formData.append('file', compiledFile, 'paper.pdf');
-                        
-                        // Use proxy for file upload
-                        const uploadResponse = await fetch(proxied(`${baseUrl}/deposit/depositions/${deposit.id}/files`), { method: 'POST', headers: { 'Authorization': `Bearer ${storedToken}` }, body: formData });
-                        if (!uploadResponse.ok) throw new Error('Falha no upload do PDF');
+                        const bucketUrl = deposit.links.bucket;
+                        if (!bucketUrl) throw new Error('Could not find bucket URL in Zenodo API response.');
+
+                        const uploadResponse = await fetch(proxied(`${bucketUrl}/paper.pdf`), {
+                            method: 'PUT',
+                            headers: {
+                                'Authorization': `Bearer ${storedToken}`,
+                                'Content-Type': 'application/octet-stream'
+                            },
+                            body: compiledFile
+                        });
+
+                        if (!uploadResponse.ok) {
+                            const errorText = await uploadResponse.text();
+                            throw new Error(`Falha no upload do PDF: ${uploadResponse.status} - ${errorText}`);
+                        }
                         
                         const creators = authors.filter(a => a.name).map(author => ({
                             name: author.name,
@@ -624,14 +634,20 @@ const App: React.FC = () => {
                     if (!createResponse.ok) throw new Error(`Erro ${createResponse.status}: Falha ao criar depósito.`);
                     const deposit = await createResponse.json();
     
-                    const formData = new FormData();
-                    formData.append('file', compiledFile, 'paper.pdf');
-                    const uploadResponse = await fetch(proxied(`${baseUrl}/deposit/depositions/${deposit.id}/files`), {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${storedToken}` }, // Content-Type is not needed with FormData
-                        body: formData
+                    const bucketUrl = deposit.links.bucket;
+                    if (!bucketUrl) throw new Error('Could not find bucket URL in Zenodo API response.');
+                    const uploadResponse = await fetch(proxied(`${bucketUrl}/paper.pdf`), {
+                        method: 'PUT',
+                        headers: {
+                            'Authorization': `Bearer ${storedToken}`,
+                            'Content-Type': 'application/octet-stream',
+                        },
+                        body: compiledFile
                     });
-                    if (!uploadResponse.ok) throw new Error('Falha no upload do PDF');
+                    if (!uploadResponse.ok) {
+                        const errorText = await uploadResponse.text();
+                        throw new Error(`Falha no upload do PDF: ${uploadResponse.status} - ${errorText}`);
+                    }
     
                     const keywordsArray = keywordsForUpload.split(',').map(k => k.trim()).filter(k => k);
                     const creators = authors.filter(a => a.name).map(author => ({
