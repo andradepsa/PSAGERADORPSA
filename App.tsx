@@ -511,7 +511,7 @@ const App: React.FC = () => {
                 await new Promise(resolve => setTimeout(resolve, pauseDuration));
                 continue; // Continue to the next article in the loop for non-quota errors
             }
-
+            
             // After processing an article, introduce a cooldown before starting the next one
             // in a manual batch to prevent hitting API rate limits.
             // This does not apply to the very last article in the batch or to continuous mode.

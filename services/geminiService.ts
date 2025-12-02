@@ -452,8 +452,8 @@ export async function generateInitialPaper(title: string, language: Language, pa
         (_, i) => `[INSERT REFERENCE ${i + 1} HERE]`
     ).join('\n\n');
 
-    // Fetch Semantic Scholar papers
-    const semanticScholarPapers = await fetchSemanticScholarPapers(title, 5); // Fetch top 5 relevant papers
+    // Fetch Semantic Scholar papers, matching the number of references needed
+    const semanticScholarPapers = await fetchSemanticScholarPapers(title, referenceCount);
     const semanticScholarContext = semanticScholarPapers.length > 0
         ? "\n\n**Additional Academic Sources from Semantic Scholar (prioritize these):**\n" +
           semanticScholarPapers.map(p => 
@@ -476,7 +476,7 @@ export async function generateInitialPaper(title: string, language: Language, pa
 
 **Rules:**
 1.  **Use Template:** Fill all placeholders [INSERT...] with relevant content.
-2.  **References:** Generate ${referenceCount} unique, high-quality citations using Google Search & Semantic Scholar. Format as plain paragraphs (\\noindent ... \\par). NO \\bibitem. NO URLs.
+2.  **References:** Generate ${referenceCount} unique, **strictly academic citations** from peer-reviewed journals, scholarly books, and conference papers. **You MUST AVOID citing general websites, blogs, or news articles.** Format as plain paragraphs (\\noindent ... \\par). NO \\bibitem. NO URLs.
 3.  **Language:** Write in **${languageName}**.
 4.  **Format:** Return valid LaTeX. NO ampersands (&) in text (use 'and'). NO CJK characters. Escape special chars (%, _, $).
 5.  **Structure:** Do NOT change commands. PRESERVE \\author/\\date verbatim.
