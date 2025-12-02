@@ -14,6 +14,8 @@ export const AVAILABLE_MODELS: {name: string, description: string}[] = [
     { name: 'grok-4-latest', description: 'Powerful model from x.ai.' },
     { name: 'gemini-2.0-flash', description: 'High-throughput model with a large context window.' },
     { name: 'gemini-2.0-flash-lite', description: 'Lightweight and very fast for high-volume tasks.' },
+    { name: 'ollama-llama3.2:3b', description: 'Ollama: Llama 3.2 (matematico10.com.br)' },
+    { name: 'ollama-mistral:7b', description: 'Ollama: Mistral 7B (matematico10.com.br)' },
 ];
 
 export const STYLE_GUIDES: StyleGuideOption[] = [

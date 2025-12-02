@@ -224,7 +224,7 @@ async function callModel(
         googleSearch?: boolean;
     } = {}
 ): Promise<GenerateContentResponse> {
-    console.log(`[Gemini Service] Calling model: ${model}`); // LOG FOR VERIFICATION
+    console.log(`[AI Service] Calling model: ${model}`); // LOG FOR VERIFICATION
 
     if (model.startsWith('gemini-')) {
         // Wrap the generation logic in the rotation handler
@@ -275,6 +275,60 @@ async function callModel(
 
             const data = await response.json();
             const text = data.choices?.[0]?.message?.content || '';
+            
+            const reconstructedResponse = {
+                candidates: [{
+                    content: { parts: [{ text: text }], role: 'model' },
+                    finishReason: 'STOP',
+                    index: 0,
+                    safetyRatings: [],
+                    groundingMetadata: { groundingChunks: [] }
+                }],
+                functionCalls: [],
+                get text() {
+                    return this.candidates?.[0]?.content?.parts?.map(p => p.text).join('') || '';
+                }
+            };
+            return reconstructedResponse as GenerateContentResponse;
+        };
+
+        return withRateLimitHandling(apiCall);
+    } else if (model.startsWith('ollama-')) {
+        const ollamaModelName = model.replace(/^ollama-/, '');
+        const OLLAMA_API_URL = 'https://ai.matematico10.com.br/api/generate';
+
+        const apiCall = async () => {
+            const response = await fetch(OLLAMA_API_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    model: ollamaModelName,
+                    prompt: userPrompt,
+                    system: systemInstruction,
+                    stream: false,
+                    options: {
+                        temperature: 0.7,
+                    }
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                let errorMessage = `Ollama API Error (${response.status}): ${errorText}`;
+                if (response.status === 503) {
+                    errorMessage = "The Ollama service (ai.matematico10.com.br) is currently unavailable or restarting. Please try again in a moment.";
+                }
+                throw new Error(errorMessage);
+            }
+
+            const data = await response.json();
+            const text = data.response || '';
+            
+            if (!text && data.error) {
+                throw new Error(`Ollama API returned an error: ${data.error}`);
+            }
             
             const reconstructedResponse = {
                 candidates: [{
