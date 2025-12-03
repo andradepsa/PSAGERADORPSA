@@ -5,7 +5,6 @@ export const ARTICLE_TEMPLATE = `\\documentclass[12pt,a4paper]{article}
 \\usepackage[utf8]{inputenc}
 \\usepackage[T1]{fontenc}
 \\usepackage{amsmath, amssymb, geometry, setspace, url, verbatim}
-\\usepackage{booktabs}
 % Babel package will be added dynamically based on language
 \\usepackage[unicode=true]{hyperref}
 
@@ -58,7 +57,7 @@ export const ARTICLE_TEMPLATE = `\\documentclass[12pt,a4paper]{article}
 \\section{Conclusion}
 [INSERT NEW CONTENT FOR CONCLUSION SECTION HERE. The content must be extensive and detailed to meet the required page count.]
 
-\\section{References}
+\\section{Referências}
 % The AI service will dynamically replace the placeholder below with [INSERT REFERENCE COUNT]
 % individual placeholders, one for each reference, separated by blank lines.
 % Each reference must be a plain paragraph starting with \\noindent and ending with \\par.
