@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Language, AnalysisResult, PaperSource, StyleGuide, SemanticScholarPaper, PersonalData } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES, SEMANTIC_SCHOLAR_API_BASE_URL } from '../constants';
@@ -302,7 +303,7 @@ async function callModel(
 export async function generatePaperTitle(topic: string, language: Language, model: string, discipline: string): Promise<string> {
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
 
-    // OPTIMIZATION: Compressed system instruction for token saving
+    // OPTIMIZATION: Compressed System Instruction
     const systemInstruction = `Act as an expert academic researcher in ${discipline}. Generate a single, compelling, high-impact scientific paper title.`;
     
     // Updated user prompt to remove hardcoded "mathematical" bias
@@ -342,6 +343,10 @@ function postProcessLatex(latexCode: string): string {
     // \u30a0-\u30ff (Katakana)
     // \uac00-\ud7af (Hangul)
     code = code.replace(/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g, '');
+
+    // REMOVE MICROTYPE to prevent timeouts on web-based compilers
+    // \usepackage{microtype} is a common cause of compilation timeouts due to heavy processing.
+    code = code.replace(/\\usepackage(\[.*?\])?\{microtype\}/g, '% \\usepackage{microtype} removed to prevent timeout');
 
     return code;
 }
@@ -783,7 +788,9 @@ export async function fixLatexPaper(paperContent: string, compilationError: stri
         -   Error "&": Replace with 'and'.
         -   Error "Unicode": Remove CJK chars (Chinese/Japanese).
         -   Error "Preamble": Simplify metadata if broken. Preserve \\author block.
+        -   Error "Timeout": Remove \\usepackage{microtype}. Check for unclosed environments.
     4.  **Prohibited:** NO \\bibitem, NO \\cite, NO URLs.
+    5.  **Optimization:** Remove \\usepackage{microtype} to avoid timeouts.
     `;
 
     const userPrompt = `Error:
