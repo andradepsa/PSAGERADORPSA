@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Language, AnalysisResult, PaperSource, StyleGuide, SemanticScholarPaper, PersonalData } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES, SEMANTIC_SCHOLAR_API_BASE_URL } from '../constants';
@@ -364,6 +363,14 @@ function postProcessLatex(latexCode: string): string {
     code = code.replace(/\\begin\{tikzpicture\}([\s\S]*?)\\end\{tikzpicture\}/gi, '');
 
     // --------------------------------------------------------------------------------
+    // NEW: SURGICAL FIX FOR "Missing $ inserted" (O_X, D^b)
+    // --------------------------------------------------------------------------------
+    // Replaces occurrences of O_X or D^b that are NOT surrounded by $ with $...$
+    // This catches common hallucinations where standard algebraic notation is treated as text.
+    // The regex looks for O_X preceded by start-of-line or space, and followed by space or punctuation.
+    code = code.replace(/(^|\s)(O_X|D\^b)(\s|[.,;:]|$)/g, '$1$$$2$$$3');
+
+    // --------------------------------------------------------------------------------
     // NEW: AGGRESSIVE URL REMOVAL FROM REFERENCES SECTION ONLY
     // --------------------------------------------------------------------------------
     const refSectionRegex = /(\\section\{(?:References|Referências)\})([\s\S]*?)(\\end\{document\}|$)/i;
@@ -534,7 +541,7 @@ export async function generateInitialPaper(title: string, language: Language, pa
     -   Example: Replace \`[[__INTRODUCTION_CONTENT__]]\` with 5-10 paragraphs defining the problem statement, context, and research objectives.
 2.  **References:** Generate ${referenceCount} unique, **strictly academic citations**. Format as plain paragraphs (\\noindent ... \\par). NO \\bibitem. NO URLs.
 3.  **Language:** Write in **${languageName}**.
-4.  **Format:** Return valid LaTeX. NO ampersands (&) in text (use 'and'). NO CJK characters. Escape special chars (%, _, $).
+4.  **Format:** Return valid LaTeX. NO ampersands (&) in text (use 'and'). NO CJK characters. Escape special chars (%, _, $). **CRITICAL: Any variable with an underscore (like O_X, p_value) MUST be wrapped in $...$ (e.g., $O_X$). Do not leave bare underscores in text.**
 5.  **Structure:** Do NOT change commands. PRESERVE \\author/\\date verbatim.
 6.  **Content:** Generate detailed content for each section to meet ~${pageCount} pages.
 7.  **TOPIC 30 ENFORCEMENT:** NO VISUALS. NO figures, tables, or includegraphics. Text only.
@@ -788,7 +795,7 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     5.  **TOPIC 30 ENFORCEMENT (STRICT):**
         -   **NO VISUALS:** Do NOT generate \\begin{figure}, \\includegraphics, or \\begin{table}.
         -   **MATH / MISSING $:** Ensure all math symbols (<, >, +, -) are inside $...$.
-        -   **UNDERSCORES:** You MUST escape underscores (_) in text mode (use \\_).
+        -   **UNDERSCORES:** Check for loose underscores (e.g., \`O_X\`). If it is math/notation, wrap in \`$...\$\` (e.g., $O_X$). If text, escape as \`\\_\`.
     6.  **No Placeholders:** Search and replace any remaining variable tokens with concrete data.
     7.  **Safety:** Do not add \\newpage.
     `;
@@ -857,7 +864,9 @@ export async function fixLatexPaper(paperContent: string, compilationError: stri
 
     **CRITICAL PRIORITY: TOPIC 30 ENFORCEMENT**
     1.  **NO VISUALS:** DELETE all \\begin{figure} ... \\end{figure}, \\begin{table} ... \\end{table}, \\includegraphics{...}, \\begin{algorithm} ... \\end{algorithm}. Do NOT comment them out, DELETE them.
-    2.  **MATH/UNDERSCORES:** The error "Missing $ inserted" is frequently caused by unescaped underscores in text mode (e.g. "variable_name"). You MUST escape them (variable\\_name) OR wrap the variable in math mode ($variable_name$) if it is a formula. Check context lines in the log.
+    2.  **MATH/UNDERSCORES:** The error "Missing $ inserted" is frequently caused by unescaped underscores in text mode (e.g. "variable_name", "O_X").
+        -   **SPECIFIC FIX:** If you see 'O_X', 'D^b', 'p_i' or similar algebraic notation in text, wrap it in $...$ (e.g., $O_X$, $D^b$).
+        -   If it's just a text underscore, escape it (variable\\_name).
     3.  **MATH SYMBOLS:** Ensure <, >, +, -, = are inside $...$ if used mathematically.
     4.  **REFERENCES:** If the error involves \\bibitem or \\thebibliography, convert the bibliography to simple paragraphs using \\noindent. Remove \\url commands.
 
