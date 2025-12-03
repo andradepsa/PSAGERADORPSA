@@ -489,7 +489,10 @@ export async function generateInitialPaper(title: string, language: Language, pa
     const systemInstruction = `Act as a world-class AI specialized in generating LaTeX scientific papers. Write a complete, rigorous paper based on the title, strictly following the provided LaTeX template.
 
 **Rules:**
-1.  **Use Template:** Fill all placeholders [INSERT...] with relevant content. **CRITICAL: You MUST replace "[INSERT NEW CONTENT...]" with actual, multi-paragraph academic text. Do NOT leave the brackets in the output.**
+1.  **Use Template:** Fill all placeholders [INSERT...] with relevant content. 
+    -   **CRITICAL:** You MUST replace "[INSERT NEW CONTENT...]" with **ACTUAL, MULTI-PARAGRAPH ACADEMIC TEXT**. 
+    -   **NEVER** leave the brackets or the placeholder text in the output. If the template says "[INSERT NEW CONTENT FOR INTRODUCTION SECTION HERE]", you must write the actual Introduction section (e.g. "The field of...") and **DELETE** the placeholder.
+    -   **FAILURE TO WRITE CONTENT IS NOT AN OPTION.**
 2.  **References:** Generate ${referenceCount} unique, **strictly academic citations** from peer-reviewed journals, scholarly books, and conference papers. **You MUST AVOID citing general websites, blogs, or news articles.** Format as plain paragraphs (\\noindent ... \\par). NO \\bibitem. NO URLs.
 3.  **Language:** Write in **${languageName}**.
 4.  **Format:** Return valid LaTeX. NO ampersands (&) in text (use 'and'). NO CJK characters. Escape special chars (%, _, $).
@@ -717,11 +720,29 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
         })
         .join('\n');
 
+    // CHECK FOR PLACEHOLDERS IN INPUT CONTENT
+    // This catches cases where the first pass failed to generate content.
+    const hasPlaceholders = paperContent.includes('[INSERT NEW CONTENT') || paperContent.includes('[INSERT REFERENCE');
+    
+    let placeholderInstruction = "";
+    if (hasPlaceholders) {
+        placeholderInstruction = `
+    **🚨 CRITICAL ALERT: UNFINISHED CONTENT DETECTED 🚨**
+    The input document contains placeholders like "[INSERT NEW CONTENT...]" or "[INSERT REFERENCE...]".
+    You **MUST** replace these placeholders with **REAL, GENERATED SCIENTIFIC CONTENT** based on the paper's title defined in the preamble.
+    -   **Introduction:** Write a full introduction (background, problem, objectives).
+    -   **Literature Review:** Synthesize relevant theories and studies related to the title.
+    -   **Methodology:** Describe a plausible research design and method.
+    -   **Results/Discussion:** Generate realistic hypothetical findings and analyze them.
+    -   **References:** Generate the missing references (plain text, no URLs).
+    **DO NOT LEAVE ANY BRACKETS OR PLACEHOLDER TEXT IN THE OUTPUT. GENERATE THE MISSING TEXT.**
+        `;
+    }
+
     // OPTIMIZATION: Compressed System Instruction
     const systemInstruction = `Act as an expert LaTeX editor. Refine the provided paper body based on suggestions.
 
-    **CRITICAL INSTRUCTION - PLACEHOLDERS:**
-    If the improvement points mention "Placeholders" or "Unfinished content", or if you see text like "[INSERT NEW CONTENT...]" in the input, you MUST DELETE the placeholder and WRITE the actual academic content for that section. Do not merely acknowledge it; perform the writing task.
+    ${placeholderInstruction}
 
     **Rules:**
     1.  **Scope:** Improve ONLY the provided body content.
@@ -755,7 +776,7 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
         console.warn("Could not find \\begin{document} for splitting. Sending full text.");
     }
 
-    const userPrompt = `Context (Preamble - DO NOT EDIT/OUTPUT THIS):
+    const userPrompt = `Context (Preamble - DO NOT EDIT/OUTPUT THIS - USE TITLE FROM HERE FOR CONTEXT):
 ${preamble}
 
 Body to Improve:
@@ -766,8 +787,13 @@ ${improvementPoints}
 
 Task: Return the COMPLETE, IMPROVED body starting with \\begin{document}.`;
 
+    // DYNAMIC MODEL SELECTION:
+    // If we have placeholders, we need a smarter model (likely the 'model' arg passed, usually Pro) to generate content from scratch.
+    // If it's just minor edits, we can use Flash to save quota.
+    const modelToUse = hasPlaceholders ? model : 'gemini-2.5-flash';
+
     // FORCED OPTIMIZATION: Use flash model to save quota/tokens during improvement loop
-    const response = await callModel('gemini-2.5-flash', systemInstruction, userPrompt);
+    const response = await callModel(modelToUse, systemInstruction, userPrompt);
     
     if (!response.candidates || response.candidates.length === 0) {
         throw new Error("AI returned no candidates for improvement.");
