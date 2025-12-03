@@ -1,3 +1,4 @@
+
 import type { AnalysisTopic } from '../types';
 
 export const ANALYSIS_TOPICS: AnalysisTopic[] = [
@@ -29,6 +30,6 @@ export const ANALYSIS_TOPICS: AnalysisTopic[] = [
     { num: 26, name: 'SCIENTIFIC CONTENT ACCURACY', desc: 'Precisão das informações científicas.' },
     { num: 27, name: 'DEPTH OF CRITICAL ANALYSIS', desc: 'Profundidade da análise crítica.' },
     { num: 28, name: 'PAGE COUNT', desc: 'Adesão ao tamanho solicitado.' },
-    { num: 29, name: 'NO PLACEHOLDERS', desc: 'Garantir a substituição de todos os placeholders por conteúdo real.' },
+    { num: 29, name: 'NO PLACEHOLDERS', desc: 'Garantir a substituição de variáveis de template ([[__...__]]) por conteúdo real.' },
     { num: 30, name: 'NO VISUALS & LATEX FIXES', desc: 'STRICT: Remove ALL figures, images, graphs, tables, and flowcharts. Robustly fix "Missing $ inserted" errors by escaping underscores (_) in text and ensuring math symbols are inside $...$.' }
 ];

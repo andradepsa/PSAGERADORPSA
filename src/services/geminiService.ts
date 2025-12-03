@@ -489,18 +489,16 @@ export async function generateInitialPaper(title: string, language: Language, pa
     const systemInstruction = `Act as a world-class AI specialized in generating LaTeX scientific papers. Write a complete, rigorous paper based on the title, strictly following the provided LaTeX template.
 
 **Rules:**
-1.  **Use Template:** Fill all placeholders [INSERT...] with relevant content. 
-    -   **CRITICAL:** You MUST replace "[INSERT NEW CONTENT...]" with **ACTUAL, MULTI-PARAGRAPH ACADEMIC TEXT**. 
-    -   **NEVER** leave the brackets or the placeholder text in the output. If the template says "[INSERT NEW CONTENT FOR INTRODUCTION SECTION HERE]", you must write the actual Introduction section (e.g. "The field of...") and **DELETE** the placeholder.
-    -   **FAILURE TO WRITE CONTENT IS NOT AN OPTION.**
-2.  **References:** Generate ${referenceCount} unique, **strictly academic citations** from peer-reviewed journals, scholarly books, and conference papers. **You MUST AVOID citing general websites, blogs, or news articles.** Format as plain paragraphs (\\noindent ... \\par). NO \\bibitem. NO URLs.
+1.  **Template Filling (CRITICAL):** The template contains variables like \`[[__INTRODUCTION_CONTENT__]]\`. 
+    -   You MUST replace these variables with **ACTUAL, EXTENSIVE ACADEMIC TEXT**.
+    -   **NEVER** leave a variable like \`[[__...__]]\` in your output. It breaks the document.
+    -   Example: Replace \`[[__INTRODUCTION_CONTENT__]]\` with 5-10 paragraphs defining the problem statement, context, and research objectives.
+2.  **References:** Generate ${referenceCount} unique, **strictly academic citations**. Format as plain paragraphs (\\noindent ... \\par). NO \\bibitem. NO URLs.
 3.  **Language:** Write in **${languageName}**.
 4.  **Format:** Return valid LaTeX. NO ampersands (&) in text (use 'and'). NO CJK characters. Escape special chars (%, _, $).
 5.  **Structure:** Do NOT change commands. PRESERVE \\author/\\date verbatim.
 6.  **Content:** Generate detailed content for each section to meet ~${pageCount} pages.
-7.  **TOPIC 30 ENFORCEMENT (MANDATORY):**
-    -   **NO VISUALS:** Do NOT generate any environments like \\begin{figure}, \\begin{table}, or \\includegraphics. Use TEXT ONLY descriptions if needed.
-    -   **CRITICAL SYNTAX RULE:** You MUST escape underscores in text mode (e.g., "variable\\_name" NOT "variable_name"). Do not use raw underscores unless in a math block ($x_i$). This avoids "Missing $ inserted" errors.
+7.  **TOPIC 30 ENFORCEMENT:** NO VISUALS. NO figures, tables, or includegraphics. Text only.
 `;
 
     // Dynamically insert the babel package and reference placeholders into the template for the prompt
@@ -508,10 +506,7 @@ export async function generateInitialPaper(title: string, language: Language, pa
         '% Babel package will be added dynamically based on language',
         `\\usepackage[${babelLanguage}]{babel}`
     ).replace(
-        '[INSERT REFERENCE COUNT]',
-        String(referenceCount)
-    ).replace(
-        '[INSERT NEW REFERENCE LIST HERE]',
+        '[[__REFERENCES_LIST__]]',
         referencePlaceholders
     );
 
@@ -521,8 +516,12 @@ export async function generateInitialPaper(title: string, language: Language, pa
         latexAuthorsBlock
     );
     templateWithBabelAndAuthor = templateWithBabelAndAuthor.replace(
-        'pdfauthor={__PDF_AUTHOR_NAMES_PLACEHOLDER__}', // Placeholder for pdfauthor in hypersetup
-        `pdfauthor={${pdfAuthorNames}}`
+        '__PDF_AUTHOR_NAMES_PLACEHOLDER__', // Placeholder for pdfauthor in hypersetup
+        pdfAuthorNames
+    );
+    templateWithBabelAndAuthor = templateWithBabelAndAuthor.replace(
+        /\[\[__TITLE__\]\]/g, // Global replace for title
+        title
     );
 
     const userPrompt = `Title: "${title}".
@@ -625,20 +624,14 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
     let cleanPaper = stripLatexComments(paperContent);
     
     // OPTIMIZATION: Strip References section for ANALYSIS ONLY.
-    // The references consume a lot of tokens but aren't strictly necessary for the AI to judge structure/flow/argumentation.
-    // This saves ~10-15% input tokens.
-    // Regex matches \section{References} or \section{Referências} and everything following it until the end of the string.
     cleanPaper = cleanPaper.replace(/\\section\{(?:References|Referências)\}[\s\S]*$/, '');
 
     // CRITICAL FIX: Detect ungenerated placeholders in the FULL content BEFORE stripping context.
-    // We use a regex to catch [INSERT ... HERE] or similar variants.
-    // This catches patterns like [INSERT NEW CONTENT FOR...], [INSERT REFERENCE...], etc.
-    const placeholderRegex = /\[INSERT.*(?:CONTENT|REFERENCE).*\]/i;
+    // We use a regex to catch [[__...__]] style or old [INSERT...] style placeholders.
+    const placeholderRegex = /\[\[__.*__\]\]|\[INSERT.*(?:CONTENT|REFERENCE).*\]/i;
     const hasUnfilledPlaceholders = placeholderRegex.test(cleanPaper);
 
     // OPTIMIZATION: Context Stripping / Strategic Extraction
-    // We only send the Abstract, Introduction and Conclusion for analysis to save massive tokens.
-    // The middleware is assumed good if the "bookends" (Intro/Conclusion) are solid.
     const contextObj = extractStrategicContext(cleanPaper);
     const paperToAnalyze = contextObj.text;
 
@@ -672,15 +665,15 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
             const result = JSON.parse(jsonText) as AnalysisResult;
 
             // POST-ANALYSIS OVERRIDE
-            // If we detected placeholders in the full text, we MUST force the "Improvement" step.
-            // We overwrite the score for Topic 29 (No Placeholders) to ensure the Editor AI fixes it.
+            // If we detected placeholders, we MUST force the "Improvement" step to act as a "Filler".
+            // We overwrite the score for Topic 29 (No Placeholders) to 0.0.
             if (hasUnfilledPlaceholders) {
-                console.warn("⚠️ Placeholder detected in content. Forcing score downgrade.");
+                console.warn("⚠️ Placeholder variables detected in content. Forcing score downgrade.");
                 const placeholderTopicIndex = result.analysis.findIndex(a => a.topicNum === 29);
                 const placeholderCritique = {
                     topicNum: 29,
                     score: 0.0, // Force 0.0 to ensure improvement loop picks it up
-                    improvement: "FATAL ERROR: The document contains unfinished content placeholders (e.g. [INSERT NEW CONTENT...]). You MUST ERASE these brackets and WRITE the missing scientific content for these sections from scratch. Do not leave any brackets."
+                    improvement: "FATAL ERROR: The document contains unfilled template variables (e.g., [[__INTRODUCTION_CONTENT__]]). You MUST replace these specific tokens with extensive, generated scientific content immediately."
                 };
 
                 if (placeholderTopicIndex !== -1) {
@@ -714,7 +707,6 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     const improvementPoints = analysis.analysis
         .filter(item => item.score < 8.5)
         .map(item => {
-            // FIX: Corrected property access from 'item.num' to 'item.topicNum'
             const topic = ANALYSIS_TOPICS.find(t => t.num === item.topicNum);
             const topicName = topic ? topic.name : `UNKNOWN TOPIC (${item.topicNum})`;
             return `- **${topicName}**: ${item.improvement}`;
@@ -722,28 +714,29 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
         .join('\n');
 
     // CHECK FOR PLACEHOLDERS IN INPUT CONTENT
-    // This catches cases where the first pass failed to generate content.
-    const placeholderRegex = /\[INSERT.*(?:CONTENT|REFERENCE).*\]/i;
+    // Catches [[__...__]] style and old [INSERT...] style
+    const placeholderRegex = /\[\[__.*__\]\]|\[INSERT.*(?:CONTENT|REFERENCE).*\]/i;
     const hasPlaceholders = placeholderRegex.test(paperContent);
     
     let placeholderInstruction = "";
     // If placeholders exist, we switch modes from "Improve" to "Complete the content"
     if (hasPlaceholders) {
         placeholderInstruction = `
-    **🚨 CRITICAL ALERT: UNFINISHED CONTENT DETECTED 🚨**
-    The input document contains placeholders like "[INSERT NEW CONTENT...]" or "[INSERT REFERENCE...]".
-    You **MUST** replace these placeholders with **REAL, GENERATED SCIENTIFIC CONTENT** based on the paper's title defined in the preamble.
-    -   **Introduction:** Write a full introduction (background, problem, objectives).
-    -   **Literature Review:** Synthesize relevant theories and studies related to the title.
-    -   **Methodology:** Describe a plausible research design and method.
-    -   **Results/Discussion:** Generate realistic hypothetical findings and analyze them.
-    -   **References:** Generate the missing references (plain text, no URLs).
-    **DO NOT LEAVE ANY BRACKETS OR PLACEHOLDER TEXT IN THE OUTPUT. GENERATE THE MISSING TEXT.**
+    **🚨 CRITICAL ALERT: TEMPLATE VARIABLES DETECTED 🚨**
+    The input document contains raw variables like \`[[__INTRODUCTION_CONTENT__]]\` or \`[INSERT...]\`.
+    **YOUR PRIMARY TASK IS TO FILL THESE HOLES.**
+    -   Replace \`[[__INTRODUCTION_CONTENT__]]\` with a full Introduction section.
+    -   Replace \`[[__LITERATURE_REVIEW_CONTENT__]]\` with a comprehensive review.
+    -   Replace \`[[__METHODOLOGY_CONTENT__]]\` with a detailed methodology.
+    -   Replace \`[[__RESULTS_CONTENT__]]\` with hypothetical but realistic results.
+    -   Replace \`[[__DISCUSSION_CONTENT__]]\` with in-depth analysis.
+    -   Replace \`[[__CONCLUSION_CONTENT__]]\` with a conclusion.
+    **DO NOT LEAVE THESE VARIABLES IN THE TEXT. GENERATE THE MISSING CONTENT.**
         `;
     }
 
     // OPTIMIZATION: Compressed System Instruction
-    const systemInstruction = `Act as an expert LaTeX editor. Refine the provided paper body based on suggestions.
+    const systemInstruction = `Act as an expert LaTeX editor. Refine the provided paper body.
 
     ${placeholderInstruction}
 
@@ -754,9 +747,9 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     4.  **Formatting:** NO \\bibitem. NO URLs. Use 'and' instead of '&'. NO CJK chars.
     5.  **TOPIC 30 ENFORCEMENT (STRICT):**
         -   **NO VISUALS:** Do NOT generate \\begin{figure}, \\includegraphics, or \\begin{table}.
-        -   **MATH / MISSING $:** Ensure all math symbols (<, >, =, +, -) are inside $...$.
-        -   **UNDERSCORES:** You MUST escape underscores (_) in text mode (use \\_) unless they are math variables inside $...$. This is critical to prevent "Missing $ inserted" errors.
-    6.  **No Placeholders:** Search and replace any remaining placeholders with concrete data.
+        -   **MATH / MISSING $:** Ensure all math symbols (<, >, +, -) are inside $...$.
+        -   **UNDERSCORES:** You MUST escape underscores (_) in text mode (use \\_).
+    6.  **No Placeholders:** Search and replace any remaining variable tokens with concrete data.
     7.  **Safety:** Do not add \\newpage.
     `;
 
@@ -766,7 +759,6 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     // OPTIMIZATION: PREAMBLE SURGERY
     // We split the Preamble (static) from the Body (dynamic).
     // We send ONLY the body to the AI to be rewritten, saving massive Output tokens.
-    // We send the Preamble only as context.
     const docStartIndex = cleanPaper.indexOf('\\begin{document}');
     let preamble = "";
     let bodyToImprove = cleanPaper;
@@ -775,7 +767,6 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
         preamble = cleanPaper.substring(0, docStartIndex);
         bodyToImprove = cleanPaper.substring(docStartIndex);
     } else {
-        // Fallback if document structure is weird: Send full text
         console.warn("Could not find \\begin{document} for splitting. Sending full text.");
     }
 
@@ -791,11 +782,9 @@ ${improvementPoints}
 Task: Return the COMPLETE, IMPROVED body starting with \\begin{document}.`;
 
     // DYNAMIC MODEL SELECTION:
-    // If we have placeholders, we need a smarter model (likely the 'model' arg passed, usually Pro) to generate content from scratch.
-    // If it's just minor edits, we can use Flash to save quota.
+    // If we have placeholders, we need a smarter model (Pro) to generate content from scratch.
     const modelToUse = hasPlaceholders ? model : 'gemini-2.5-flash';
 
-    // FORCED OPTIMIZATION: Use flash model to save quota/tokens during improvement loop
     const response = await callModel(modelToUse, systemInstruction, userPrompt);
     
     if (!response.candidates || response.candidates.length === 0) {
@@ -809,15 +798,12 @@ Task: Return the COMPLETE, IMPROVED body starting with \\begin{document}.`;
     let improvedBody = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
 
     // STITCHING: If we successfully split, we must re-attach the preamble.
-    // We check if the AI followed instructions and returned only the body (starts with \begin{document} or similar)
-    // or if it returned a full document (contains \documentclass).
     if (docStartIndex !== -1 && !improvedBody.includes('\\documentclass')) {
         // AI behaved: It returned the body. Stitch it.
         return postProcessLatex(preamble + "\n" + improvedBody);
     } 
     
     // AI misbehaved or we didn't split: It returned a full doc. Return as is.
-    // Ensure the paper ends with \end{document}
     if (!improvedBody.includes('\\end{document}')) {
         improvedBody += '\n\\end{document}';
     }
