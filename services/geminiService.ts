@@ -708,7 +708,7 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     2.  **Output:** Return valid LaTeX body (from \\begin{document} to \\end{document}). NO Preamble.
     3.  **Language:** **${languageName}**.
     4.  **Formatting:** NO \\bibitem. NO URLs. Use 'and' instead of '&'. NO CJK chars.
-    5.  **Placeholders:** Fill any remaining placeholders like [INSERT NEW CONTENT...].
+    5.  **No Placeholders:** Search and replace any remaining placeholders with concrete data.
     6.  **Safety:** Do not add \\newpage. Do not add images.
     `;
 
