@@ -892,9 +892,6 @@ const App: React.FC = () => {
     const handleToggleContinuousMode = () => {
         const newStatus = !isContinuousMode;
         setIsContinuousMode(newStatus);
-        if (newStatus) {
-            setNumberOfArticles(1); // Force 1 to avoid "7 Artigos" text confusion
-        }
         localStorage.setItem('isContinuousMode', String(newStatus));
         if (!newStatus) isGenerationCancelled.current = true;
     };
@@ -1034,7 +1031,7 @@ const App: React.FC = () => {
                                 <div>
                                     <h4 className="font-semibold text-center mb-2 text-gray-700">Automação Contínua (Loop)</h4>
                                     <div className="flex items-center justify-center gap-2"><span className={`font-semibold transition-colors ${!isContinuousMode ? 'text-indigo-600' : 'text-gray-500'}`}>Off</span><label htmlFor="continuousToggle" className="relative inline-flex items-center cursor-pointer"><input type="checkbox" checked={isContinuousMode} onChange={handleToggleContinuousMode} id="continuousToggle" className="sr-only peer" /><div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div></label><span className={`font-semibold transition-colors ${isContinuousMode ? 'text-indigo-600' : 'text-gray-500'}`}>On</span></div>
-                                    <p className="text-center text-xs text-gray-500 mt-1">Gera um artigo por vez continuamente, com <strong>pausas de 1 minuto</strong>.</p>
+                                    <p className="text-center text-xs text-gray-500 mt-1">Gera um artigo por vez continuamente, com pausas de 1 minuto.</p>
                                 </div>
                                  <div>
                                     <h4 className="font-semibold text-center mb-2 text-gray-700">Agendamento Automático</h4>

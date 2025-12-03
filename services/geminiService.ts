@@ -1,3 +1,8 @@
+
+
+
+
+
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Language, AnalysisResult, PaperSource, StyleGuide, SemanticScholarPaper, PersonalData } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES, SEMANTIC_SCHOLAR_API_BASE_URL } from '../constants';
@@ -302,14 +307,17 @@ async function callModel(
 export async function generatePaperTitle(topic: string, language: Language, model: string, discipline: string): Promise<string> {
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
 
-    // OPTIMIZATION: Compressed System Instruction
-    const systemInstruction = `Act as an expert academic researcher in ${discipline}. Generate a single, compelling, high-impact scientific paper title.`;
+    // Updated system instruction to be dynamic based on the discipline
+    const systemInstruction = `You are an expert academic researcher in the field of ${discipline}. Your task is to generate a single, compelling, and high-impact title for a scientific paper.`;
     
     // Updated user prompt to remove hardcoded "mathematical" bias
-    const userPrompt = `Topic: "${topic}" in ${discipline}.
-    Task: Generate a single, novel, specific, high-impact research title.
-    Language: **${languageName}**.
-    Constraint: Return ONLY the title text. No quotes.`;
+    const userPrompt = `Based on the topic "${topic}" within the discipline of ${discipline}, generate a single, novel, and specific title for a high-impact research paper. 
+    
+    **Requirements:**
+    - The title must sound like a genuine, modern academic publication in ${discipline}.
+    - It must be concise and impactful.
+    - It must be written in **${languageName}**.
+    - Your entire response MUST be only the title itself. Do not include quotation marks, labels like "Title:", or any other explanatory text.`;
 
     const response = await callModel(model, systemInstruction, userPrompt);
     
@@ -333,99 +341,17 @@ function postProcessLatex(latexCode: string): string {
     
     // CRITICAL: Strip CJK (Chinese, Japanese, Korean) characters
     // The default pdflatex compiler does not support these characters and will crash.
+    // We remove them to ensure the paper compiles.
+    // Ranges:
+    // \u4e00-\u9fff (Common CJK)
+    // \u3400-\u4dbf (Extension A)
+    // \uf900-\ufaff (Compatibility)
+    // \u3040-\u309f (Hiragana)
+    // \u30a0-\u30ff (Katakana)
+    // \uac00-\ud7af (Hangul)
     code = code.replace(/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g, '');
 
-    // REMOVE MICROTYPE to prevent timeouts on web-based compilers
-    code = code.replace(/\\usepackage(\[.*?\])?\{microtype\}/g, '% \\usepackage{microtype} removed to prevent timeout');
-
-    // SURGICAL FIX FOR TOPIC 30 (No Visuals & LaTeX Fixes)
-    // We programmatically STRIP AND DELETE figure and table environments and includegraphics commands
-    // to ensure the paper is text-only and compilation-safe.
-    
-    // Remove \includegraphics commands
-    code = code.replace(/\\includegraphics(\[.*?\])?\{.*?\}/gi, '');
-    
-    // Remove figure environments
-    code = code.replace(/\\begin\{figure\*?\}([\s\S]*?)\\end\{figure\*?\}/gi, '');
-    
-    // Remove table environments
-    code = code.replace(/\\begin\{table\*?\}([\s\S]*?)\\end\{table\*?\}/gi, '');
-    
-    // Remove algorithm/listing environments if present
-    code = code.replace(/\\begin\{algorithm\*?\}([\s\S]*?)\\end\{algorithm\*?\}/gi, '');
-    code = code.replace(/\\begin\{listing\*?\}([\s\S]*?)\\end\{listing\*?\}/gi, '');
-    code = code.replace(/\\begin\{tikzpicture\}([\s\S]*?)\\end\{tikzpicture\}/gi, '');
-
-    // *** NEW: Remove diagram environments (cause of "Environment diagram undefined") ***
-    code = code.replace(/\\begin\{diagram\*?\}([\s\S]*?)\\end\{diagram\*?\}/gi, '');
-    code = code.replace(/\\begin\{CD\*?\}([\s\S]*?)\\end\{CD\*?\}/gi, '');
-
     return code;
-}
-
-/**
- * Strips comments from LaTeX code to save tokens.
- * Matches '%' that are at the start of a line OR not preceded by a backslash.
- */
-function stripLatexComments(text: string): string {
-    return text.replace(/(^|[^\\])%.*$/gm, '$1').trim();
-}
-
-/**
- * Extracts only the body content between \begin{document} and \end{document}
- * to save tokens during analysis.
- */
-function extractDocumentBody(latex: string): string {
-    const beginTag = '\\begin{document}';
-    const endTag = '\\end{document}';
-    const startIndex = latex.indexOf(beginTag);
-    const endIndex = latex.lastIndexOf(endTag);
-    
-    if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-        // Return content inside document environment, trimmed
-        return latex.substring(startIndex + beginTag.length, endIndex).trim();
-    }
-    // Fallback: if tags are not found or malformed, return the full (stripped) latex
-    return latex;
-}
-
-/**
- * STRATEGIC OPTIMIZATION:
- * Extracts only the Abstract, Introduction, and Conclusion.
- * This reduces input tokens for analysis by ~60-70% while keeping the critical
- * "promise" (Intro) and "delivery" (Conclusion) context.
- */
-function extractStrategicContext(latex: string): { text: string, isTruncated: boolean } {
-    let combined = "";
-    
-    // 1. Extract Abstract
-    const abstractMatch = latex.match(/\\begin\{abstract\}([\s\S]*?)\\end\{abstract\}/i);
-    if (abstractMatch) {
-        combined += "\\section*{Abstract}\n" + abstractMatch[1].trim() + "\n\n";
-    }
-
-    // 2. Extract Introduction
-    // Matches content starting at \section{Introduction} until the next \section
-    const introMatch = latex.match(/\\section\{(?:Introduction|Introdução)\}([\s\S]*?)(?=\\section\{)/i);
-    if (introMatch) {
-        combined += "\\section{Introduction}\n" + introMatch[1].trim() + "\n\n";
-        combined += "\n% ... [MIDDLE SECTIONS (Literature, Methodology, Results, Discussion) OMITTED FOR AI ANALYSIS EFFICIENCY] ...\n\n";
-    }
-
-    // 3. Extract Conclusion
-    // Matches content starting at \section{Conclusion} until the next \section or end of doc
-    const conclusionMatch = latex.match(/\\section\{(?:Conclusion|Conclusão|Considerações Finais)\}([\s\S]*?)(?=\\section\{|\\end\{document\})/i);
-    if (conclusionMatch) {
-        combined += "\\section{Conclusion}\n" + conclusionMatch[1].trim() + "\n\n";
-    }
-
-    // Safety Fallback: If regex failed (e.g. customized section names) or result is too short,
-    // revert to full body extraction to ensure the AI has something to analyze.
-    if (combined.length < 500) {
-        return { text: extractDocumentBody(latex), isTruncated: false };
-    }
-
-    return { text: combined, isTruncated: true };
 }
 
 /**
@@ -461,18 +387,18 @@ export async function generateInitialPaper(title: string, language: Language, pa
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
     const babelLanguage = BABEL_LANG_MAP[language];
 
-    // Reduced from 20 to 10 to save tokens as requested by user
-    const referenceCount = 10;
+    // Fixed to 20 references max as per requirement
+    const referenceCount = 20;
 
     const referencePlaceholders = Array.from(
         { length: referenceCount },
         (_, i) => `[INSERT REFERENCE ${i + 1} HERE]`
     ).join('\n\n');
 
-    // Fetch Semantic Scholar papers, matching the number of references needed
-    const semanticScholarPapers = await fetchSemanticScholarPapers(title, referenceCount);
+    // Fetch Semantic Scholar papers
+    const semanticScholarPapers = await fetchSemanticScholarPapers(title, 5); // Fetch top 5 relevant papers
     const semanticScholarContext = semanticScholarPapers.length > 0
-        ? "\n\n**Additional Academic Sources from Semantic Scholar (prioritize these):**\n" +
+        ? "\n\n**Additional Academic Sources from Semantic Scholar (prioritize these for high-quality references):**\n" +
           semanticScholarPapers.map(p => 
               `- Title: ${p.title}\n  Authors: ${p.authors.map(a => a.name).join(', ')}\n  Abstract: ${p.abstract || 'N/A'}\n  URL: ${p.url}`
           ).join('\n---\n')
@@ -488,19 +414,28 @@ export async function generateInitialPaper(title: string, language: Language, pa
 
     const pdfAuthorNames = authorDetails.map(a => a.name).filter(Boolean).join(', ');
 
-    // OPTIMIZATION: Compressed System Instruction
-    const systemInstruction = `Act as a world-class AI specialized in generating LaTeX scientific papers. Write a complete, rigorous paper based on the title, strictly following the provided LaTeX template.
 
-**Rules:**
-1.  **Use Template:** Fill all placeholders [INSERT...] with relevant content.
-2.  **References:** Generate ${referenceCount} unique, **strictly academic citations** from peer-reviewed journals, scholarly books, and conference papers. **You MUST AVOID citing general websites, blogs, or news articles.** Format as plain paragraphs (\\noindent ... \\par). NO \\bibitem. NO URLs.
-3.  **Language:** Write in **${languageName}**.
-4.  **Format:** Return valid LaTeX. NO ampersands (&) in text (use 'and'). NO CJK characters. Escape special chars (%, _, $).
-5.  **Structure:** Do NOT change commands. PRESERVE \\author/\\date verbatim.
-6.  **Content:** Generate detailed content for each section to meet ~${pageCount} pages.
-7.  **TOPIC 30 ENFORCEMENT (MANDATORY):**
-    -   **NO VISUALS:** Do NOT generate \\begin{figure}, \\begin{table}, \\includegraphics, \\begin{diagram}, or \\begin{CD}. Use TEXT ONLY descriptions if needed.
-    -   **CRITICAL SYNTAX RULE:** You MUST escape underscores in text mode (e.g., "variable\\_name" NOT "variable_name"). Do not use raw underscores unless in a math block ($x_i$). This avoids "Missing $ inserted" errors.
+    const systemInstruction = `You are a world-class AI assistant specialized in generating high-quality, well-structured scientific papers in LaTeX format. Your task is to write a complete, coherent, and academically rigorous paper based on a provided title, strictly following a given LaTeX template.
+
+**Execution Rules:**
+1.  **Use the Provided Template:** You will be given a LaTeX template with placeholders like [INSERT ... HERE]. Your entire output MUST be the complete LaTeX document after filling in these placeholders with new, relevant content.
+2.  **Fill All Placeholders:** You must replace all placeholders with content appropriate for the new paper's title.
+    -   \`[INSERT NEW TITLE HERE]\`: Replace with the new title.
+    -   \`[INSERT NEW COMPLETE ABSTRACT HERE]\`: Write a new abstract for the paper in the \`\\begin{abstract}\` environment. The abstract text itself must not contain any LaTeX commands.
+    -   \`[INSERT COMMA-SEPARATED KEYWORDS HERE]\`: Provide new keywords relevant to the title.
+    -   \`[INSERT NEW CONTENT FOR ... SECTION HERE]\`: Write substantial, high-quality academic content for each section (Introduction, Literature Review, etc.) to generate a paper of approximately **${pageCount} pages**.
+    -   \`[INSERT REFERENCE 1 HERE]\` through \`[INSERT REFERENCE ${referenceCount} HERE]\`: For each of these placeholders, generate a single, unique academic reference relevant to the title. **Use Google Search grounding and the provided "Additional Academic Sources from Semantic Scholar" for this. Prioritize the quality and academic rigor of the Semantic Scholar sources first for references.** Each generated reference must be a plain paragraph, for example, starting with \`\\noindent\` and ending with \`\\par\`. Do NOT use \`\\bibitem\` or \`thebibliography\`.
+3.  **Strictly Adhere to Structure:** Do NOT modify the LaTeX structure provided in the template. Do not add or remove packages, or alter the section commands. **CRITICAL: The \\author{} and \\date{} commands and their content are pre-filled by the application and should be preserved verbatim by the LLM. Do NOT change or overwrite them. The author block will be dynamically generated before this prompt is sent to you.** The only exception is adding the correct babel package for the language.
+4.  **Language:** The entire paper must be written in **${languageName}**.
+5.  **Output Format:** The entire output MUST be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) around the LaTeX code.
+6.  **CRITICAL RULE - AVOID AMPERSAND:** To prevent compilation errors, you **MUST NOT** use the ampersand character ('&').
+    -   In the bibliography/reference section, you MUST use the word 'and' to separate author names.
+    -   **Example (Incorrect):** "Smith, J. & Doe, J."
+    -   **Example (Correct):** "Smith, J. and J. Doe."
+7.  **CRITICAL RULE - OTHER CHARACTERS:** You must also properly escape other special LaTeX characters like '%', '$', '#', '_', '{', '}'. For example, an underscore must be written as \`\\_\`.
+8.  **CRITICAL RULE - NO URLs:** References must **NOT** contain any URLs or web links. Format them as academic citations only, without any \`\\url{}\` commands.
+9.  **CRITICAL RULE - NO CJK CHARACTERS:** Do **NOT** use Chinese, Japanese, or Korean characters (like 霸, ba) in the document. The compiler strictly supports Latin characters only. If a term is inherently Asian, use its Pinyin or Romanized transliteration instead (e.g., use "Ba" instead of the character).
+10. **CRITICAL RULE - METADATA:** Do NOT place complex content inside the \`\\hypersetup{...}\` command. Only the title and author should be there.
 `;
 
     // Dynamically insert the babel package and reference placeholders into the template for the prompt
@@ -525,7 +460,7 @@ export async function generateInitialPaper(title: string, language: Language, pa
         `pdfauthor={${pdfAuthorNames}}`
     );
 
-    const userPrompt = `Title: "${title}".
+    const userPrompt = `Using the following LaTeX template, generate a complete scientific paper with the title: "${title}".
 ${semanticScholarContext}
 **Template:**
 \`\`\`latex
@@ -580,23 +515,46 @@ function cleanJsonOutput(text: string): string {
 
 export async function analyzePaper(paperContent: string, pageCount: number, model: string): Promise<AnalysisResult> {
     const analysisTopicsList = ANALYSIS_TOPICS.map(t => `- Topic ${t.num} (${t.name}): ${t.desc}`).join('\n');
+    const systemInstruction = `You are an expert academic reviewer AI. Your task is to perform a rigorous, objective, and multi-faceted analysis of a provided scientific paper written in LaTeX.
+
+    **Input:** You will receive the full LaTeX source code of a scientific paper and a list of analysis topics with numeric identifiers.
     
-    // OPTIMIZATION: Compressed System Instruction
-    const systemInstruction = `Act as an expert academic reviewer. Perform a rigorous, objective analysis of the LaTeX paper.
-
     **Task:**
-    1.  Analyze paper against criteria.
-    2.  Score each 0.0-10.0 (10=perfect).
-    3.  Provide ONE concise, critical improvement suggestion per topic.
-    4.  Topic 28 (Page Count): Score based on target ${pageCount} pages.
+    1.  Analyze the paper based on the provided quality criteria.
+    2.  For each criterion, provide a numeric score from 0.0 to 10.0, where 10.0 is flawless.
+    3.  For each criterion, provide a concise, single-sentence improvement suggestion. This suggestion must be a direct critique of the paper's current state and offer a clear path for enhancement. Do NOT write generic praise. Be critical and specific.
+    4.  The "PAGE COUNT" topic (Topic 28) must be evaluated based on the user's requested page count of ${pageCount}. A perfect score of 10 is achieved if the paper is exactly ${pageCount} pages long. The score should decrease linearly based on the deviation from this target. For example, if the paper is ${pageCount - 2} or ${pageCount + 2} pages, the score might be around 8.0.
 
-    **Output:**
-    -   Return ONLY valid JSON.
-    -   Schema: { "analysis": [ { "topicNum": number, "score": number, "improvement": string } ] }
-    -   No markdown, no text explanations.
+    **Output Format:**
+    -   You MUST return your analysis as a single, valid JSON object.
+    -   Do NOT include any text, explanations, or markdown formatting (like \`\`\`json) outside of the JSON object.
+    -   **Do NOT output LaTeX commands (like \\nobreak, \\newline) inside the JSON values.**
+    -   The JSON object must have a single key "analysis" which is an array of objects.
+    -   Each object in the array must have three keys:
+        1.  "topicNum": The numeric identifier of the topic being analyzed (number).
+        2.  "score": The numeric score from 0.0 to 10.0 (number).
+        3.  "improvement": The single-sentence improvement suggestion (string).
 
-    **Criteria:**
+    **Analysis Topics:**
     ${analysisTopicsList}
+
+    **Example Output:**
+    \`\`\`json
+    {
+      "analysis": [
+        {
+          "topicNum": 0,
+          "score": 8.5,
+          "improvement": "The discussion section slightly deviates into an unrelated sub-topic that should be removed to maintain focus."
+        },
+        {
+          "topicNum": 1,
+          "score": 7.8,
+          "improvement": "Several paragraphs contain run-on sentences that should be split for better readability."
+        }
+      ]
+    }
+    \`\`\`
     `;
     
     const responseSchema = {
@@ -618,43 +576,12 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
         required: ["analysis"],
     };
 
-    // Calculate rough page estimate from the FULL content before stripping (approx 3000 chars per page in LaTeX)
-    const estimatedPagesFromChars = Math.max(1, Math.round(paperContent.length / 3000));
-
-    // Strip comments to reduce token usage
-    let cleanPaper = stripLatexComments(paperContent);
-    
-    // OPTIMIZATION: Strip References section for ANALYSIS ONLY.
-    // The references consume a lot of tokens but aren't strictly necessary for the AI to judge structure/flow/argumentation.
-    // This saves ~10-15% input tokens.
-    // Regex matches \section{References} or \section{Referências} and everything following it until the end of the string.
-    cleanPaper = cleanPaper.replace(/\\section\{(?:References|Referências)\}[\s\S]*$/, '');
-
-    // CRITICAL FIX: Detect ungenerated placeholders in the FULL content BEFORE stripping context.
-    // If the strategic extraction removes the middle sections (where the placeholders usually are),
-    // the AI won't see them and will give a high score, ending the loop prematurely.
-    const hasUnfilledPlaceholders = cleanPaper.includes('[INSERT NEW CONTENT');
-
-    // OPTIMIZATION: Context Stripping / Strategic Extraction
-    // We only send the Abstract, Introduction and Conclusion for analysis to save massive tokens.
-    // The middleware is assumed good if the "bookends" (Intro/Conclusion) are solid.
-    const contextObj = extractStrategicContext(cleanPaper);
-    const paperToAnalyze = contextObj.text;
-
-    // Modify prompt to inform AI about the truncation if it happened
-    const truncationNote = contextObj.isTruncated 
-        ? `\n\n**NOTE:** Text is a **STRATEGIC EXTRACT** (Abstract+Intro+Conclusion) of a ${estimatedPagesFromChars}-page doc. References are omitted. Assume missing sections exist for structure/page-count scores.`
-        : "";
-
-    const finalSystemInstruction = systemInstruction + truncationNote;
-
     // Retry logic for JSON parsing failures
     const MAX_PARSE_RETRIES = 3;
     
     for (let attempt = 1; attempt <= MAX_PARSE_RETRIES; attempt++) {
         try {
-            // Use strategic paper context instead of full body
-            const response = await callModel(model, finalSystemInstruction, paperToAnalyze, {
+            const response = await callModel(model, systemInstruction, paperContent, {
                 jsonOutput: true,
                 responseSchema: responseSchema
             });
@@ -668,28 +595,8 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
             }
 
             const jsonText = cleanJsonOutput(response.text);
-            const result = JSON.parse(jsonText) as AnalysisResult;
-
-            // POST-ANALYSIS OVERRIDE
-            // If we detected placeholders in the full text, we MUST force the "Improvement" step.
-            // We overwrite the score for Topic 13 (Structure) to ensure the Editor AI fixes it.
-            if (hasUnfilledPlaceholders) {
-                console.warn("⚠️ Placeholder detected in content. Forcing score downgrade.");
-                const structureTopicIndex = result.analysis.findIndex(a => a.topicNum === 13);
-                const placeholderCritique = {
-                    topicNum: 13,
-                    score: 2.0,
-                    improvement: "CRITICAL: The document contains unfinished template placeholders (e.g., [INSERT NEW CONTENT...]). You MUST generate the missing content for these sections immediately."
-                };
-
-                if (structureTopicIndex !== -1) {
-                    result.analysis[structureTopicIndex] = placeholderCritique;
-                } else {
-                    result.analysis.push(placeholderCritique);
-                }
-            }
-
-            return result;
+            const result = JSON.parse(jsonText);
+            return result as AnalysisResult;
 
         } catch (error) {
             console.warn(`Attempt ${attempt} to analyze paper failed (JSON Parse/Validation):`, error);
@@ -716,107 +623,78 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
             // FIX: Corrected property access from 'item.num' to 'item.topicNum'
             const topic = ANALYSIS_TOPICS.find(t => t.num === item.topicNum);
             const topicName = topic ? topic.name : `UNKNOWN TOPIC (${item.topicNum})`;
-            return `- **${topicName}**: ${item.improvement}`;
+            return `- **${topicName} (Score: ${item.score})**: ${item.improvement}`;
         })
         .join('\n');
 
-    // OPTIMIZATION: Compressed System Instruction
-    const systemInstruction = `Act as an expert LaTeX editor. Refine the provided paper body based on suggestions.
+    const systemInstruction = `You are a world-class AI assistant specialized in editing and improving scientific papers written in LaTeX. Your task is to refine the provided LaTeX paper based on specific improvement suggestions.
 
-    **Rules:**
-    1.  **Scope:** Improve ONLY the provided body content.
-    2.  **Output:** Return valid LaTeX body (from \\begin{document} to \\end{document}). NO Preamble.
-    3.  **Language:** **${languageName}**.
-    4.  **Formatting:** NO \\bibitem. NO URLs. Use 'and' instead of '&'. NO CJK chars.
-    5.  **TOPIC 30 ENFORCEMENT (STRICT):**
-        -   **NO VISUALS:** Do NOT generate \\begin{figure}, \\includegraphics, \\begin{table}, \\begin{diagram}, or \\begin{CD}.
-        -   **MATH / MISSING $:** Ensure all math symbols (<, >, =, +, -) are inside $...$.
-        -   **UNDERSCORES:** You MUST escape underscores (_) in text mode (use \\_) unless they are math variables inside $...$. This is critical to prevent "Missing $ inserted" errors.
-    6.  **No Placeholders:** Search and replace any remaining placeholders with concrete data.
-    7.  **Safety:** Do not add \\newpage.
+    **Instructions for Improvement:**
+    -   Critically analyze the provided "Current Paper Content" against the "Improvement Points".
+    -   Apply the necessary changes directly to the LaTeX source code to address each improvement point.
+    -   Ensure that the scientific content remains accurate and coherent.
+    -   Maintain the exact LaTeX preamble, author information, title, and metadata structure as in the original. Do NOT change \\documentclass, \\usepackage, \\hypersetup, \\title, \\author, \\date. **CRITICAL: The author block, including \\author{} and related commands, is pre-filled by the application and should be preserved verbatim by the LLM. Do NOT change or overwrite it.**
+    -   The entire output MUST be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) before \`\\documentclass\` or after \`\\end{document}\`.
+    -   The language of the entire paper must remain in **${languageName}**.
+    -   **CRITICAL: Absolutely DO NOT use the \`\\begin{thebibliography}\`, \`\\end{thebibliography}\`, or \`\\bibitem\` commands anywhere in the document. The references MUST be formatted as a plain, unnumbered list directly following \`\\section{Referências}\`.**
+    -   **CRITICAL RULE - AVOID AMPERSAND:** You **MUST NOT** use the ampersand character ('&'). Use the word 'and' instead, especially for separating author names.
+    -   **CRITICAL RULE - NO CJK CHARACTERS:** Do NOT introduce any Chinese, Japanese, or Korean characters. Use transliteration (Pinyin) if needed.
+    -   **Do NOT use the \`\\cite{}\` command anywhere in the text.**
+    -   **Do NOT add or remove \`\\newpage\` commands. Let the LaTeX engine handle page breaks automatically.**
+    -   **Crucially, do NOT include any images, figures, organograms, flowcharts, diagrams, or complex tables in the improved paper.**
+    -   **CRITICAL: Ensure that no URLs or web links are present in the references section. All references must be formatted as academic citations only, without any \\url{} commands or direct links.**
+    -   Focus on improving aspects directly related to the provided feedback. Do not introduce new content unless necessary to address a critique.
     `;
 
-    // Strip comments to reduce input token usage, AI will rewrite content anyway
-    const cleanPaper = stripLatexComments(paperContent);
-    
-    // OPTIMIZATION: PREAMBLE SURGERY
-    // We split the Preamble (static) from the Body (dynamic).
-    // We send ONLY the body to the AI to be rewritten, saving massive Output tokens.
-    // We send the Preamble only as context.
-    const docStartIndex = cleanPaper.indexOf('\\begin{document}');
-    let preamble = "";
-    let bodyToImprove = cleanPaper;
+    const userPrompt = `Current Paper Content:\n\n${paperContent}\n\nImprovement Points:\n\n${improvementPoints}\n\nBased on the above improvement points, provide the complete, improved LaTeX source code for the paper.`;
 
-    if (docStartIndex !== -1) {
-        preamble = cleanPaper.substring(0, docStartIndex);
-        bodyToImprove = cleanPaper.substring(docStartIndex);
-    } else {
-        // Fallback if document structure is weird: Send full text
-        console.warn("Could not find \\begin{document} for splitting. Sending full text.");
-    }
-
-    const userPrompt = `Context (Preamble - DO NOT EDIT/OUTPUT THIS):
-${preamble}
-
-Body to Improve:
-${bodyToImprove}
-
-Feedback to Apply:
-${improvementPoints}
-
-Task: Return the COMPLETE, IMPROVED body starting with \\begin{document}.`;
-
-    // FORCED OPTIMIZATION: Use flash model to save quota/tokens during improvement loop
-    const response = await callModel('gemini-2.5-flash', systemInstruction, userPrompt);
+    const response = await callModel(model, systemInstruction, userPrompt);
     
     if (!response.candidates || response.candidates.length === 0) {
         throw new Error("AI returned no candidates for improvement.");
     }
     
+    // Safety check
     if (!response.text) {
         throw new Error("AI returned an empty response for the improvement step.");
     }
 
-    let improvedBody = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
+    let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
 
-    // STITCHING: If we successfully split, we must re-attach the preamble.
-    // We check if the AI followed instructions and returned only the body (starts with \begin{document} or similar)
-    // or if it returned a full document (contains \documentclass).
-    if (docStartIndex !== -1 && !improvedBody.includes('\\documentclass')) {
-        // AI behaved: It returned the body. Stitch it.
-        return postProcessLatex(preamble + "\n" + improvedBody);
-    } 
-    
-    // AI misbehaved or we didn't split: It returned a full doc. Return as is.
     // Ensure the paper ends with \end{document}
-    if (!improvedBody.includes('\\end{document}')) {
-        improvedBody += '\n\\end{document}';
+    if (!paper.includes('\\end{document}')) {
+        paper += '\n\\end{document}';
     }
 
-    return postProcessLatex(improvedBody);
+    return postProcessLatex(paper);
 }
 
 export async function fixLatexPaper(paperContent: string, compilationError: string, model: string): Promise<string> {
-    // OPTIMIZATION: Compressed System Instruction
-    const systemInstruction = `Act as an expert LaTeX debugger. Fix compilation errors.
+    const systemInstruction = `You are an expert LaTeX editor AI. Your task is to fix a compilation error in a given LaTeX document. You must be extremely precise and surgical in your changes to avoid introducing new errors.
 
-    **CRITICAL PRIORITY: TOPIC 30 ENFORCEMENT**
-    1.  **NO VISUALS:** DELETE all \\begin{figure} ... \\end{figure}, \\begin{table} ... \\end{table}, \\includegraphics{...}, \\begin{algorithm} ... \\end{algorithm}, \\begin{diagram} ... \\end{diagram}. Do NOT comment them out, DELETE them.
-    2.  **MATH/UNDERSCORES:** The error "Missing $ inserted" is frequently caused by unescaped underscores in text mode (e.g. "variable_name"). You MUST escape them (variable\\_name) OR wrap the variable in math mode ($variable_name$) if it is a formula. Check context lines in the log.
-    3.  **MATH SYMBOLS:** Ensure <, >, +, -, = are inside $...$ if used mathematically.
-
-    **General Rules:**
-    1.  **Precision:** Fix the specific error found in the log.
-    2.  **Output:** Return the FULL, CORRECTED, VALID LaTeX document.
-    3.  **Formatting:** No \\bibitem (use plain text), No \\cite (use plain text), No URLs. No CJK chars.
+    **CRITICAL INSTRUCTIONS:**
+    1.  You will receive the full LaTeX source code of a paper and the specific error message from the compiler.
+    2.  Your task is to identify the root cause of the error and correct **ONLY** the necessary lines in the LaTeX code to resolve it.
+    3.  **DO NOT** rewrite or refactor large sections of the document. Make the smallest change possible.
+    4.  The entire output **MUST** be a single, valid, and complete LaTeX document. Do not include any explanatory text, markdown formatting, or code fences (like \`\`\`latex\`) before \`\\documentclass\` or after \`\\end{document}\`.
+    5.  **HIGHEST PRIORITY:** If the error message is "Misplaced alignment tab character &", the problem is an unescaped ampersand ('&'). Your primary action MUST be to find every instance of '&' and replace it with the word 'and', especially in the reference list. Example Fix: Change "Bondal, A., & Orlov, D." to "Bondal, A. and Orlov, D.". This is the most common and critical error to fix.
+    6.  **UNICODE ERROR PRIORITY:** If the error mentions "Unicode character" (e.g., Chinese, Japanese characters like 霸), you **MUST REMOVE** that character or replace it with its Pinyin/English equivalent. The compiler does not support CJK characters.
+    7.  Generally maintain the preamble, BUT if the compilation error is directly related to the preamble (especially the \\hypersetup command or metadata), you MUST fix it by removing or simplifying the problematic fields. **CRITICAL: The author block, including \\author{} and related commands, is pre-filled by the application and should be preserved verbatim by the LLM. Do NOT change or overwrite it.**
+    8.  **DO NOT** use commands like \`\\begin{thebibliography}\`, \`\\bibitem\`, or \`\\cite{}\`.
+    9.  **DO NOT** add or remove \`\\newpage\` commands.
+    10. **DO NOT** include any images, figures, or complex tables.
+    11. **CRITICAL:** Ensure that no URLs are present in the references section.
+    12. Return only the corrected LaTeX source code.
     `;
 
-    const userPrompt = `Error:
+    const userPrompt = `The following LaTeX document failed to compile. Analyze the error message and the code, then provide the complete, corrected LaTeX source code.
+
+**Compilation Error Message:**
 \`\`\`
 ${compilationError}
 \`\`\`
 
-Code:
+**Full LaTeX Document with Error:**
 \`\`\`latex
 ${paperContent}
 \`\`\`
@@ -845,19 +723,22 @@ export async function reformatPaperWithStyleGuide(paperContent: string, styleGui
         throw new Error(`Unknown style guide: ${styleGuide}`);
     }
 
-    // OPTIMIZATION: Compressed System Instruction
-    const systemInstruction = `Act as academic editor. Reformat ONLY the References section.
+    const systemInstruction = `You are an expert academic editor specializing in citation and reference formatting. Your task is to reformat the bibliography of a scientific paper according to a specific style guide.
 
-    **Rules:**
-    1.  **Style:** ${styleGuideInfo.name}.
-    2.  **Scope:** Edit ONLY content in \\section{References}. Keep preamble/body exact.
-    3.  **Format:** Plain list. NO \\bibitem. NO URLs.
-    4.  **Output:** Full LaTeX document.
+    **CRITICAL INSTRUCTIONS:**
+    1.  You will receive the full LaTeX source code of a paper.
+    2.  Your task is to reformat **ONLY** the content within the \`\\section{Referências}\` or \`\\section{References}\` section.
+    3.  You **MUST NOT** change any other part of the document. The preamble, abstract, body text, conclusion, etc., must remain absolutely identical to the original. **CRITICAL: The author block, including \\author{} and related commands, is pre-filled by the application and should be preserved verbatim by the LLM. Do NOT change or overwrite it.**
+    4.  The new reference list must strictly adhere to the **${styleGuideInfo.name} (${styleGuideInfo.description})** formatting rules.
+    5.  **CRITICAL RULE - AVOID AMPERSAND:** You **MUST NOT** use the ampersand character ('&'). Use the word 'and' to separate author names.
+    6.  The number of references in the output must be the same as in the input.
+    7.  The final output must be the **COMPLETE, FULL** LaTeX document, with only the reference section's content modified. Do not provide only the reference section or include any explanatory text or markdown formatting.
+    8.  **CRITICAL: Ensure that no URLs or web links are present in the reformatted references. All references must be formatted as academic citations only, without any \\url{} commands or direct links.**
     `;
 
-    const userPrompt = `Reformat references to ${styleGuideInfo.name}.
+    const userPrompt = `Please reformat the references in the following LaTeX document to conform to the ${styleGuideInfo.name} style guide. Return the full, unchanged document with only the reference list updated.
 
-    **Document:**
+    **LaTeX Document:**
     \`\`\`latex
     ${paperContent}
     \`\`\`
