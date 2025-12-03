@@ -357,6 +357,35 @@ function postProcessLatex(latexCode: string): string {
     code = code.replace(/\\begin\{listing\*?\}([\s\S]*?)\\end\{listing\*?\}/gi, '');
     code = code.replace(/\\begin\{tikzpicture\}([\s\S]*?)\\end\{tikzpicture\}/gi, '');
 
+    // --------------------------------------------------------------------------------
+    // NEW: AGGRESSIVE URL REMOVAL FROM REFERENCES SECTION ONLY
+    // --------------------------------------------------------------------------------
+    const refSectionRegex = /(\\section\{(?:References|Referências)\})([\s\S]*?)(\\end\{document\}|$)/i;
+    const match = code.match(refSectionRegex);
+
+    if (match) {
+        const [fullMatch, sectionHeader, content, endTag] = match;
+        let cleanedContent = content;
+
+        // 1. Remove \url{...} commands
+        cleanedContent = cleanedContent.replace(/\\url\{[^}]+\}/g, '');
+        
+        // 2. Remove \href{...}{...} commands
+        cleanedContent = cleanedContent.replace(/\\href\{[^}]+\}\{[^}]+\}/g, '');
+        
+        // 3. Remove raw http/https text
+        cleanedContent = cleanedContent.replace(/https?:\/\/[^\s}]+/g, '');
+        
+        // 4. Remove standard prefixes often found before links
+        cleanedContent = cleanedContent.replace(/(?:Available at|Retrieved from|Acessado em|Disponível em|Doi|DOI):\s*[,.;]?/gi, '');
+        
+        // 5. Clean up empty parentheses or brackets that might be left over: () or []
+        cleanedContent = cleanedContent.replace(/\(\s*\)/g, '').replace(/\[\s*\]/g, '');
+
+        // Reassemble the code with the cleaned references section
+        code = code.replace(fullMatch, `${sectionHeader}${cleanedContent}${endTag}`);
+    }
+
     return code;
 }
 
@@ -499,6 +528,7 @@ export async function generateInitialPaper(title: string, language: Language, pa
 5.  **Structure:** Do NOT change commands. PRESERVE \\author/\\date verbatim.
 6.  **Content:** Generate detailed content for each section to meet ~${pageCount} pages.
 7.  **TOPIC 30 ENFORCEMENT:** NO VISUALS. NO figures, tables, or includegraphics. Text only.
+8.  **NO LINKS:** ABSOLUTELY NO URLs in References. Plain text citations only.
 `;
 
     // Dynamically insert the babel package and reference placeholders into the template for the prompt
