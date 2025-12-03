@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Language, AnalysisResult, PaperSource, StyleGuide, SemanticScholarPaper, PersonalData } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES, SEMANTIC_SCHOLAR_API_BASE_URL } from '../constants';
@@ -488,7 +489,7 @@ export async function generateInitialPaper(title: string, language: Language, pa
     const systemInstruction = `Act as a world-class AI specialized in generating LaTeX scientific papers. Write a complete, rigorous paper based on the title, strictly following the provided LaTeX template.
 
 **Rules:**
-1.  **Use Template:** Fill all placeholders [INSERT...] with relevant content.
+1.  **Use Template:** Fill all placeholders [INSERT...] with relevant content. **CRITICAL: You MUST replace "[INSERT NEW CONTENT...]" with actual, multi-paragraph academic text. Do NOT leave the brackets in the output.**
 2.  **References:** Generate ${referenceCount} unique, **strictly academic citations** from peer-reviewed journals, scholarly books, and conference papers. **You MUST AVOID citing general websites, blogs, or news articles.** Format as plain paragraphs (\\noindent ... \\par). NO \\bibitem. NO URLs.
 3.  **Language:** Write in **${languageName}**.
 4.  **Format:** Return valid LaTeX. NO ampersands (&) in text (use 'and'). NO CJK characters. Escape special chars (%, _, $).
@@ -668,18 +669,18 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
 
             // POST-ANALYSIS OVERRIDE
             // If we detected placeholders in the full text, we MUST force the "Improvement" step.
-            // We overwrite the score for Topic 13 (Structure) to ensure the Editor AI fixes it.
+            // We overwrite the score for Topic 29 (No Placeholders) to ensure the Editor AI fixes it.
             if (hasUnfilledPlaceholders) {
                 console.warn("⚠️ Placeholder detected in content. Forcing score downgrade.");
-                const structureTopicIndex = result.analysis.findIndex(a => a.topicNum === 13);
+                const placeholderTopicIndex = result.analysis.findIndex(a => a.topicNum === 29);
                 const placeholderCritique = {
-                    topicNum: 13,
-                    score: 2.0,
-                    improvement: "CRITICAL: The document contains unfinished template placeholders (e.g., [INSERT NEW CONTENT...]). You MUST generate the missing content for these sections immediately."
+                    topicNum: 29,
+                    score: 0.0, // Force 0.0 to ensure improvement loop picks it up
+                    improvement: "FATAL ERROR: The document contains unfinished content placeholders (e.g. [INSERT NEW CONTENT...]). You MUST ERASE these brackets and WRITE the missing scientific content for these sections from scratch. Do not leave any brackets."
                 };
 
-                if (structureTopicIndex !== -1) {
-                    result.analysis[structureTopicIndex] = placeholderCritique;
+                if (placeholderTopicIndex !== -1) {
+                    result.analysis[placeholderTopicIndex] = placeholderCritique;
                 } else {
                     result.analysis.push(placeholderCritique);
                 }
@@ -718,6 +719,9 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
 
     // OPTIMIZATION: Compressed System Instruction
     const systemInstruction = `Act as an expert LaTeX editor. Refine the provided paper body based on suggestions.
+
+    **CRITICAL INSTRUCTION - PLACEHOLDERS:**
+    If the improvement points mention "Placeholders" or "Unfinished content", or if you see text like "[INSERT NEW CONTENT...]" in the input, you MUST DELETE the placeholder and WRITE the actual academic content for that section. Do not merely acknowledge it; perform the writing task.
 
     **Rules:**
     1.  **Scope:** Improve ONLY the provided body content.
