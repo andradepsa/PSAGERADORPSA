@@ -28,7 +28,8 @@ export const ANALYSIS_TOPICS: AnalysisTopic[] = [
     { num: 25, name: 'THEORETICAL FOUNDATION', desc: 'Base teórica sólida.' },
     { num: 26, name: 'SCIENTIFIC CONTENT ACCURACY', desc: 'Precisão das informações científicas.' },
     { num: 27, name: 'DEPTH OF CRITICAL ANALYSIS', desc: 'Profundidade da análise crítica.' },
-    { num: 28, name: 'PAGE COUNT', desc: 'Adesão ao tamanho solicitado.' }
+    { num: 28, name: 'PAGE COUNT', desc: 'Adesão ao tamanho solicitado.' },
+    { num: 29, name: 'DATA COMPLETENESS', desc: 'Verifica ausência de placeholders e presença de dados inventados plausíveis.' }
 ];
 
 export const DISCIPLINE_AUTHORS: Record<string, string> = {
@@ -378,7 +379,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
     "    - Iterative refinement",
   ],
   "History of Humanity": [
-    // Pré-história e evolução humana
     "Hominin Evolution",
       "- Sahelanthropus tchadensis (7–6 Ma)",
       "- Orrorin tugenensis",
@@ -421,14 +421,12 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
         "- Bronze Age Collapse (Sea Peoples, 1177 BCE theories)",
         "- Urnfield culture, Terramare, Tumulus culture",
       "- Iron Age (Hallstatt, La Tène, Jōmon–Yayoi transition)",
-
-    // Civilizações antigas
     "Mesopotamia (detailed chronology)",
       "- Ubaid → Uruk period (world’s first cities, proto-cuneiform)",
       "- Jemdet Nasr, Early Dynastic (city-states, Royal Tombs of Ur)",
       "- Akkadian Empire (Sargon, Naram-Sin stele)",
       "- Gutian interlude, Ur III (Shulgi bureaucracy)",
-      "- Old Babylonian (Hammabi Code), Kassites",
+      "- Old Babylonian (Hammurabi Code), Kassites",
       "- Middle & Neo-Assyrian Empire (Ashurnasirpal II, Library of Ashurbanipal)",
       "- Neo-Babylonian (Nebuchadnezzar II, Ishtar Gate)",
     "Ancient Egypt (full periods)",
@@ -472,8 +470,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
       "- Garamantes (Trans-Saharan trade)",
       "- Bantu migrations",
       "- Medieval: Ghana, Mali (Mansa Musa, Timbuktu), Songhai (Askia Muhammad), Great Zimbabwe, Mutapa, Luba-Lunda, Kongo Kingdom, Benin bronzes",
-
-    // Mundo clássico e medieval
     "Greek World",
       "- Minoan & Mycenaean",
       "- Greek Dark Ages",
@@ -510,8 +506,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
       "- Mongol Empire (Genghis Khan, Pax Mongolica, Yuan China)",
       "- Ming treasure fleets (Zheng He)",
       "- Japanese Heian → Kamakura → Muromachi → Sengoku → Tokugawa shogunate",
-
-    // Era Moderna e Contemporânea (detalhada)
     "Renaissance & Early Modern",
       "- Italian Renaissance (Florence: Medici, Michelangelo, Leonardo, Machiavelli)",
       "- Northern Renaissance (Erasmus, Dürer, Thomas More)",
@@ -554,7 +548,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
       "- Cold War (Truman Doctrine → Fall of USSR 1991)",
       "- Decolonization waves (India 1947, Africa 1960, Algeria 1962)",
       "- Post-Cold War conflicts (Gulf War, Yugoslavia, 9/11, Iraq, Afghanistan, Arab Spring, Ukraine 2014/2022)",
-
     "Contemporary Global Issues",
       "- Globalization & Anti-globalization",
       "- Digital Revolution (Internet, Web1/2/3, AI revolution)",
@@ -562,7 +555,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
       "- Pandemics (1918 flu, HIV/AIDS, COVID-19)",
       "- Space Age & Colonization prospects"
   ],
-
   "Mathematics": [
     "Foundations & Logic",
       "- Naive vs axiomatic set theory (ZFC, NBG, MK)",
@@ -643,7 +635,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
       "- Financial math (Black-Scholes, Heston, jump models)",
       "- Data science & machine learning theory (PAC learning, kernel methods, deep learning theory)"
   ],
-
   "Geography": [
     "Physical Geography",
       "- Geomorphology",
@@ -684,7 +675,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
       "- GIScience (spatial analysis, geostatistics, network analysis)",
       "- GNSS (GPS, Galileo, BeiDou), LiDAR, drone mapping"
   ],
-
   "Biology": [
     "Cell & Molecular Biology",
       "- Prokaryotes vs eukaryotes, organelles (mitochondria, chloroplasts, endomembrane)",
@@ -722,7 +712,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
       "- Marine biology (deep sea, hydrothermal vents, coral triangle)",
       "- Paleobiology (Cambrian explosion, Ediacaran, Burgess Shale, dinosaur-bird transition)"
   ],
-
   "Chemistry": [
     "General & Physical Chemistry",
       "- Thermodynamics (laws, Gibbs, Helmholtz, phase diagrams, fugacity)",
@@ -750,7 +739,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
       "- Nucleic acids (DNA repair, recombination, transposons)",
       "- Signal molecules (NO, neurotransmitters, eicosanoids)"
   ],
-
   "Physics": [
     "Classical Mechanics",
       "- Newtonian, Lagrangian, Hamiltonian, Hamilton-Jacobi",
@@ -789,7 +777,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
       "- Nonlinear optics, lasers, photonics",
       "- Plasmonics, metamaterials"
   ],
-
   "Astronomy & Astrophysics": [
     "Observational Techniques",
       "- Ground telescopes (VLT, Keck, ELT, GMT)",
@@ -816,7 +803,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
       "- Large-scale structure (BAO, voids, filaments)",
       "- Multiverse (string landscape, eternal inflation bubbles)"
   ],
-
   "Philosophy": [
     "Ancient",
       "- Pre-Socratics (Thales → Anaxagoras → Atomists)",
@@ -846,7 +832,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
       "- Philosophy of Mind (dualism, physicalism, functionalism, panpsychism)",
       "- Aesthetics, Political Philosophy (Rawls, Nozick, communitarianism)"
   ],
-  
   "Literature": [
     "I. FUNDAMENTOS TEÓRICOS E CONCEITUAIS",
     "- 1. Conceitos e Natureza da Literatura",
@@ -876,7 +861,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
     "  - 4.2. Catarsis e experiência estética",
     "  - 4.3. Literatura como instrumento de poder",
     "  - 4.4. A função política e ideológica da ficção",
-
     "II. LITERATURA DA ANTIGUIDADE",
     "- 1. Literaturas do Oriente Antigo",
     "  - 1.1. Mesopotâmia: Epopeia de Gilgamesh",
@@ -901,7 +885,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
     "  - 4.3. Sátira: Juvenal",
     "  - 4.4. Prosa e filosofia: Sêneca, Cícero, Tácito",
     "  - 4.5. Teatro e oratória romana",
-
     "III. LITERATURA MEDIEVAL (SÉC. V–XV)",
     "- 1. Características Gerais",
     "  - 1.1. Teocentrismo e moral religiosa",
@@ -923,7 +906,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
     "  - 5.1. Poesia árabe e persa",
     "  - 5.2. Literatura nórdica e sagas islandesas",
     "  - 5.3. Mil e Uma Noites e narrativa oriental",
-
     "IV. RENASCIMENTO (SÉC. XIV–XVI)",
     "- 1. Humanismo e Antropocentrismo",
     "- 2. Redescoberta dos Clássicos",
@@ -935,7 +917,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
     "  - França: Rabelais, Montaigne",
     "- 4. Teatro e Filosofia Renascentista",
     "- 5. Literatura de viagens e descobrimentos",
-
     "V. CLASSICISMO E BARROCO",
     "- 1. Classicismo",
     "  - 1.1. Ideal de medida e razão",
@@ -945,7 +926,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
     "  - 2.1. Contraste e antítese: corpo x alma",
     "  - 2.2. Temas da fugacidade e da morte",
     "  - 2.3. Autores: Gôngora, Quevedo, Donne, Gregório de Matos",
-
     "VI. ILUSTRAÇÃO E NEOCLASSICISMO (SÉC. XVIII)",
     "- 1. O Século das Luzes",
     "  - 1.1. Racionalismo e crítica social",
@@ -953,7 +933,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
     "  - 1.3. Literatura filosófica: Voltaire, Rousseau, Diderot",
     "  - 1.4. Teatro ilustrado: Beaumarchais",
     "  - 1.5. Poesia moral: Pope, Bocage",
-
     "VII. ROMANTISMO (SÉC. XIX)",
     "- 1. Contexto histórico e ideológico",
     "  - 1.1. Revoluções e nacionalismos",
@@ -969,7 +948,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
     "  - 3.1. Liberdade formal",
     "  - 3.2. O amor idealizado e o exílio",
     "  - 3.3. O herói marginal",
-
     "VIII. REALISMO, NATURALISMO E PARNASIANISMO",
     "- 1. Realismo",
     "  - 1.1. Crítica à idealização romântica",
@@ -980,12 +958,10 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
     "  - 2.2. Zola e o romance experimental",
     "  - 2.3. Temas de miséria e vício",
     "- 3. Parnasianismo e objetividade estética",
-
     "IX. SIMBOLISMO E MODERNIDADE",
     "- 1. Esteticismo e musicalidade",
     "- 2. Autores: Baudelaire, Verlaine, Mallarmé, Cruz e Sousa",
     "- 3. Transição para o Modernismo",
-
     "X. VANGUARDAS E MODERNISMO (SÉC. XX)",
     "- 1. Vanguardas Europeias",
     "  - Futurismo",
@@ -1003,7 +979,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
     "  - Fragmentação e simultaneidade",
     "  - Ironia e anti-herói",
     "  - Rejeição da linearidade narrativa",
-
     "XI. LITERATURA CONTEMPORÂNEA (1945–ATUAL)",
     "- 1. Pós-modernismo e metanarrativas",
     "- 2. Realismo mágico e neofantástico (García Márquez, Cortázar, Allende)",
@@ -1015,14 +990,12 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
     "- 8. Ecocrítica e literatura ambiental",
     "- 9. Ficção científica e distopia (Orwell, Huxley, Dick, Le Guin)",
     "- 10. Literatura global e multiculturalismo",
-
     "XII. LITERATURA DIGITAL E HÍBRIDA",
     "- 1. Hipertexto e narrativa interativa",
     "- 2. Literatura de plataforma e redes sociais",
     "- 3. Poesia digital, bots e IA criativa",
     "- 4. Escrita colaborativa e fanfiction",
     "- 5. Realidade aumentada e ficção imersiva",
-
     "XIII. LITERATURA COMPARADA E INTERDISCIPLINAR",
     "- 1. Literatura e filosofia",
     "- 2. Literatura e psicologia (Freud, Jung, Lacan)",
@@ -1031,7 +1004,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
     "- 5. Literatura e música",
     "- 6. Literatura e artes visuais",
     "- 7. Mitologia comparada e arquétipos",
-
     "XIV. TEORIA LITERÁRIA E CRÍTICA",
     "- 1. Formalismo russo",
     "- 2. Estruturalismo e semiótica (Saussure, Barthes)",
@@ -1042,7 +1014,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
     "- 7. Estudos pós-coloniais (Said, Spivak, Bhabha)",
     "- 8. Teoria da recepção (Iser, Jauss)",
     "- 9. Narratologia e discurso",
-
     "XV. LITERATURAS REGIONAIS E NACIONAIS (MACROZONAS)",
     "- 1. Europa Ocidental",
     "  - França, Inglaterra, Alemanha, Itália, Espanha, Portugal",
@@ -1061,7 +1032,6 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
     "  - Austrália, Nova Zelândia, Ilhas do Pacífico",
     "- 8. Lusofonia mundial",
     "  - Portugal, Brasil, Angola, Moçambique, Cabo Verde",
-
     "XVI. TENDÊNCIAS FUTURAS",
     "- 1. Ciborgues literários e autoria híbrida",
     "- 2. Ética e propriedade intelectual na era da IA",
@@ -1071,27 +1041,30 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
   ]
 };
 
-/**
- * Returns a list of all available disciplines.
- * @returns {string[]} An array of discipline names.
- */
-export function getAllDisciplines(): string[] {
+export const getAllDisciplines = (): string[] => {
     return Object.keys(ALL_TOPICS_BY_DISCIPLINE);
-}
+};
 
-/**
- * Returns a random topic from a specified discipline.
- * @param {string} discipline - The discipline name to get a topic from.
- * @returns {string} A random topic string.
- */
-export function getRandomTopic(discipline: string): string {
-    const topics = ALL_TOPICS_BY_DISCIPLINE[discipline];
-    if (!topics || topics.length === 0) {
-        // Fallback in case a discipline is added without topics
-        const allDisciplines = Object.keys(ALL_TOPICS_BY_DISCIPLINE);
-        const randomDiscipline = allDisciplines[Math.floor(Math.random() * allDisciplines.length)];
-        const fallbackTopics = ALL_TOPICS_BY_DISCIPLINE[randomDiscipline];
-        return fallbackTopics[Math.floor(Math.random() * fallbackTopics.length)];
+export const getRandomTopic = (discipline?: string): string => {
+    const disciplinesToChooseFrom = discipline ? [discipline] : Object.keys(ALL_TOPICS_BY_DISCIPLINE);
+    if (disciplinesToChooseFrom.length === 0) {
+        return '';
     }
-    return topics[Math.floor(Math.random() * topics.length)];
-}
+    // Fallback if the selected discipline key is invalid/empty in the map
+    const targetDiscipline = (discipline && ALL_TOPICS_BY_DISCIPLINE[discipline]) 
+        ? discipline 
+        : disciplinesToChooseFrom[Math.floor(Math.random() * disciplinesToChooseFrom.length)];
+
+    const topics = ALL_TOPICS_BY_DISCIPLINE[targetDiscipline];
+    
+    if (topics && topics.length > 0) {
+        return topics[Math.floor(Math.random() * topics.length)];
+    }
+    
+    // Last resort fallback
+    const allDisciplines = Object.keys(ALL_TOPICS_BY_DISCIPLINE);
+    if (allDisciplines.length === 0) return '';
+    const randomFallback = allDisciplines[Math.floor(Math.random() * allDisciplines.length)];
+    const fallbackTopics = ALL_TOPICS_BY_DISCIPLINE[randomFallback];
+    return fallbackTopics && fallbackTopics.length > 0 ? fallbackTopics[Math.floor(Math.random() * fallbackTopics.length)] : '';
+};

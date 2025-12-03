@@ -111,10 +111,10 @@ async function executeWithKeyRotation<T>(
     // Note: loadKeys() will maintain the current randomized index for this window unless the list changed drastically.
     KeyManager.loadKeys(); 
 
-    // We allow trying each key once before giving up entirely on this specific request.
+    // Determine max attempts based on the number of available keys
     const maxAttempts = KeyManager.keys.length > 0 ? KeyManager.keys.length : 1;
-    
-    // However, if we only have 1 key, we still want to retry transient errors a few times.
+
+    // We allow trying each key once before giving up entirely on this specific request.
     // The inner retry logic inside `withRateLimitHandling` handles transient 500s/429s.
     // This outer loop handles "Hard Quota" or "Persistent 429" by switching keys.
     
@@ -497,16 +497,17 @@ export async function generateInitialPaper(title: string, language: Language, pa
 
     const pdfAuthorNames = authorDetails.map(a => a.name).filter(Boolean).join(', ');
 
-    // OPTIMIZATION: Compressed System Instruction
+    // OPTIMIZATION: Compressed System Instruction with stricter data invention rules
     const systemInstruction = `Act as a world-class AI specialized in generating LaTeX scientific papers. Write a complete, rigorous paper based on the title, strictly following the provided LaTeX template.
 
 **Rules:**
 1.  **Use Template:** Fill all placeholders [INSERT...] with relevant content.
-2.  **References:** Generate ${referenceCount} unique, **strictly academic citations** from peer-reviewed journals, scholarly books, and conference papers. **You MUST AVOID citing general websites, blogs, or news articles.** Format as plain paragraphs (\\noindent ... \\par). NO \\bibitem. NO URLs.
-3.  **Language:** Write in **${languageName}**.
-4.  **Format:** Return valid LaTeX. NO ampersands (&) in text (use 'and'). NO CJK characters. Escape special chars (%, _, $).
-5.  **Structure:** Do NOT change commands. PRESERVE \\author/\\date verbatim.
-6.  **Content:** Generate detailed content for each section to meet ~${pageCount} pages.
+2.  **Invent Data:** You MUST invent plausible experimental results, data points, percentages, and statistical values (e.g., "98.5% accuracy", "p < 0.01"). NEVER leave placeholders like "[INSERT VALUE]" or "[XX]". The paper must appear essentially complete and real.
+3.  **References:** Generate ${referenceCount} unique, **strictly academic citations** from peer-reviewed journals, scholarly books, and conference papers. **You MUST AVOID citing general websites, blogs, or news articles.** Format as plain paragraphs (\\noindent ... \\par). NO \\bibitem. NO URLs.
+4.  **Language:** Write in **${languageName}**.
+5.  **Format:** Return valid LaTeX. NO ampersands (&) in text (use 'and'). NO CJK characters. Escape special chars (%, _, $).
+6.  **Structure:** Do NOT change commands. PRESERVE \\author/\\date verbatim.
+7.  **Content:** Generate detailed content for each section to meet ~${pageCount} pages.
 `;
 
     // Dynamically insert the babel package and reference placeholders into the template for the prompt
@@ -595,6 +596,7 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
     2.  Score each 0.0-10.0 (10=perfect).
     3.  Provide ONE concise, critical improvement suggestion per topic.
     4.  Topic 28 (Page Count): Score based on target ${pageCount} pages.
+    5.  Topic 29 (Data Completeness): Check for placeholders like [INSERT]. Score < 4 if found.
 
     **Output:**
     -   Return ONLY valid JSON.
@@ -639,7 +641,7 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
     // CRITICAL FIX: Detect ungenerated placeholders in the FULL content BEFORE stripping context.
     // If the strategic extraction removes the middle sections (where the placeholders usually are),
     // the AI won't see them and will give a high score, ending the loop prematurely.
-    const hasUnfilledPlaceholders = cleanPaper.includes('[INSERT NEW CONTENT');
+    const hasUnfilledPlaceholders = cleanPaper.includes('[INSERT NEW CONTENT') || cleanPaper.includes('[INSERT VALUE]') || cleanPaper.includes('[INSERT ACCURACY');
 
     // OPTIMIZATION: Context Stripping / Strategic Extraction
     // We only send the Abstract, Introduction and Conclusion for analysis to save massive tokens.
@@ -678,18 +680,18 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
 
             // POST-ANALYSIS OVERRIDE
             // If we detected placeholders in the full text, we MUST force the "Improvement" step.
-            // We overwrite the score for Topic 13 (Structure) to ensure the Editor AI fixes it.
+            // We overwrite the score for Topic 29 (Data Completeness) to ensure the Editor AI fixes it.
             if (hasUnfilledPlaceholders) {
-                console.warn("⚠️ Placeholder detected in content. Forcing score downgrade.");
-                const structureTopicIndex = result.analysis.findIndex(a => a.topicNum === 13);
+                console.warn("⚠️ Placeholder detected in content. Forcing score downgrade for Topic 29.");
+                const dataTopicIndex = result.analysis.findIndex(a => a.topicNum === 29);
                 const placeholderCritique = {
-                    topicNum: 13,
+                    topicNum: 29,
                     score: 2.0,
-                    improvement: "CRITICAL: The document contains unfinished template placeholders (e.g., [INSERT NEW CONTENT...]). You MUST generate the missing content for these sections immediately."
+                    improvement: "CRITICAL: The document contains unfinished template placeholders (e.g., [INSERT VALUE], [INSERT ACCURACY]). You MUST generate the missing content and invent concrete data for these sections immediately."
                 };
 
-                if (structureTopicIndex !== -1) {
-                    result.analysis[structureTopicIndex] = placeholderCritique;
+                if (dataTopicIndex !== -1) {
+                    result.analysis[dataTopicIndex] = placeholderCritique;
                 } else {
                     result.analysis.push(placeholderCritique);
                 }
@@ -726,7 +728,7 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
         })
         .join('\n');
 
-    // OPTIMIZATION: Compressed System Instruction
+    // OPTIMIZATION: Compressed System Instruction with stricter data invention rules
     const systemInstruction = `Act as an expert LaTeX editor. Refine the provided paper body based on suggestions.
 
     **Rules:**
@@ -734,7 +736,7 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     2.  **Output:** Return valid LaTeX body (from \\begin{document} to \\end{document}). NO Preamble.
     3.  **Language:** **${languageName}**.
     4.  **Formatting:** NO \\bibitem. NO URLs. Use 'and' instead of '&'. NO CJK chars.
-    5.  **Placeholders:** Fill any remaining placeholders like [INSERT NEW CONTENT...].
+    5.  **No Placeholders:** Search for and REPLACE any remaining placeholders (like [INSERT...], [VALUE], [XX]) with specific, plausible academic content and invented data.
     6.  **Safety:** Do not add \\newpage. Do not add images.
     `;
 
