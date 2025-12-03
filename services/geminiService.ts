@@ -115,7 +115,7 @@ async function executeWithKeyRotation<T>(
     const maxAttempts = KeyManager.keys.length > 0 ? KeyManager.keys.length : 1;
     
     // However, if we only have 1 key, we still want to retry transient errors a few times.
-    // The inner retry logic inside `withRateLimit handling` handles transient 500s/429s.
+    // The inner retry logic inside `withRateLimitHandling` handles transient 500s/429s.
     // This outer loop handles "Hard Quota" or "Persistent 429" by switching keys.
     
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -328,32 +328,20 @@ export async function generatePaperTitle(topic: string, language: Language, mode
 
 // Programmatic post-processing to fix common LaTeX issues
 function postProcessLatex(latexCode: string): string {
-    let code = latexCode;
-
-    // 1. Remove Visual Elements (Figures, Tables, Images) to prevent compilation errors
-    // Match \begin{figure} ... \end{figure} (including * variant)
-    code = code.replace(/\\begin\{figure\*?\}([\s\S]*?)\\end\{figure\*?\}/g, '');
-    // Match \begin{table} ... \end{table} (including * variant)
-    code = code.replace(/\\begin\{table\*?\}([\s\S]*?)\\end\{table\*?\}/g, '');
-    // Remove \includegraphics commands
-    code = code.replace(/\\includegraphics(\[.*?\])?\{.*?\}/g, '');
-
     // Robustly replace ampersands used for authors in bibliographies
-    code = code.replace(/,?\s+&\s+/g, ' and ');
+    let code = latexCode.replace(/,?\s+&\s+/g, ' and ');
     
     // CRITICAL: Strip CJK (Chinese, Japanese, Korean) characters
     // The default pdflatex compiler does not support these characters and will crash.
     // We remove them to ensure the paper compiles.
+    // Ranges:
+    // \u4e00-\u9fff (Common CJK)
+    // \u3400-\u4dbf (Extension A)
+    // \uf900-\ufaff (Compatibility)
+    // \u3040-\u309f (Hiragana)
+    // \u30a0-\u30ff (Katakana)
+    // \uac00-\ud7af (Hangul)
     code = code.replace(/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g, '');
-
-    // EMERGENCY FIX: Escape underscores in text-mode commands
-    // The error `! Missing $ inserted` often occurs because \text{variable_name} assumes text mode,
-    // where '_' is invalid. It should be \text{variable\_name}.
-    // We apply this to \text, \textit, \textbf, \caption, \section, etc. to prevent compilation crashes.
-    code = code.replace(/\\(text|textit|textbf|caption|section|subsection|subsubsection)\{([^}]+)\}/g, (match, command, content) => {
-        // Escape underscores that are not already escaped
-        return `\\${command}{${content.replace(/(?<!\\)_/g, '\\_')}}`;
-    });
 
     return code;
 }
@@ -721,12 +709,7 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     3.  **Language:** **${languageName}**.
     4.  **Formatting:** NO \\bibitem. NO URLs. Use 'and' instead of '&'. NO CJK chars.
     5.  **No Placeholders:** Search and replace any remaining placeholders with concrete data.
-    6.  **Safety:** Do not add \\newpage.
-    7.  **NO VISUALS:** Strictly REMOVE all 'figure', 'table', 'includegraphics', 'tikzpicture' environments.
-    8.  **LATEX SYNTAX - CRITICAL:** You MUST escape underscores (_) when used in text mode (e.g., variable names).
-        - INCORRECT: \\text{model_size}
-        - CORRECT: \\text{model\\_size}
-        - Failure to escape causes "Missing $ inserted" errors.
+    6.  **Safety:** Do not add \\newpage. Do not add images.
     `;
 
     // Strip comments to reduce input token usage, AI will rewrite content anyway
@@ -800,8 +783,6 @@ export async function fixLatexPaper(paperContent: string, compilationError: stri
         -   Error "&": Replace with 'and'.
         -   Error "Unicode": Remove CJK chars (Chinese/Japanese).
         -   Error "Preamble": Simplify metadata if broken. Preserve \\author block.
-        -   Error "Missing $": Escape underscores in text modes (\\text{var\\_name}).
-        -   Error "Figures/Tables": REMOVE all visuals.
     4.  **Prohibited:** NO \\bibitem, NO \\cite, NO URLs.
     `;
 

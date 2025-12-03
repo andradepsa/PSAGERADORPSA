@@ -14,7 +14,7 @@ export const ANALYSIS_TOPICS: AnalysisTopic[] = [
     { num: 10, name: 'CONCLUSION QUALITY', desc: 'Resumo de achados e trabalhos futuros.' },
     { num: 11, name: 'ARGUMENTATION STRENGTH', desc: 'Lógica e evidências.' },
     { num: 12, name: 'COHERENCE AND FLOW', desc: 'Transições suaves entre seções.' },
-    { num: 13, name: 'STRUCTURE', desc: 'Estrutura LaTeX.' },
+    { num: 13, name: 'STRUCTURE', desc: 'Organização geral do LaTeX.' },
     { num: 14, name: 'REFERENCES', desc: 'Formatação e relevância.' },
     { num: 15, name: 'SCOPE AND BOUNDARIES', desc: 'Definição clara do escopo.' },
     { num: 16, name: 'SCIENTIFIC HONESTY', desc: 'Transparência e evitar plágio.' },
@@ -30,5 +30,5 @@ export const ANALYSIS_TOPICS: AnalysisTopic[] = [
     { num: 27, name: 'DEPTH OF CRITICAL ANALYSIS', desc: 'Profundidade da análise crítica.' },
     { num: 28, name: 'PAGE COUNT', desc: 'Adesão ao tamanho solicitado.' },
     { num: 29, name: 'NO PLACEHOLDERS', desc: 'Garantir a substituição de todos os placeholders por conteúdo real.' },
-    { num: 30, name: 'NO VISUAL ELEMENTS & SYNTAX FIX', desc: 'CRÍTICO: 1) REMOVER todas as Figuras/Tabelas. 2) CORRIGIR ERRO "! Missing $ inserted": Escapar underscores em comandos de texto (ex: usar \text{model\_size} em vez de \text{model_size}). Underscores não escapados em modo texto causam falha fatal.' }
+    { num: 30, name: 'NO VISUALS & LATEX FIXES', desc: 'Remover figuras, imagens, gráficos, tabelas, fluxogramas. Corrigir erro "Missing $ inserted" e escapar underscores (_).' }
 ];
