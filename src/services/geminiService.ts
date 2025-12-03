@@ -631,9 +631,10 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
     cleanPaper = cleanPaper.replace(/\\section\{(?:References|Referências)\}[\s\S]*$/, '');
 
     // CRITICAL FIX: Detect ungenerated placeholders in the FULL content BEFORE stripping context.
-    // If the strategic extraction removes the middle sections (where the placeholders usually are),
-    // the AI won't see them and will give a high score, ending the loop prematurely.
-    const hasUnfilledPlaceholders = cleanPaper.includes('[INSERT NEW CONTENT');
+    // We use a regex to catch [INSERT ... HERE] or similar variants.
+    // This catches patterns like [INSERT NEW CONTENT FOR...], [INSERT REFERENCE...], etc.
+    const placeholderRegex = /\[INSERT.*(?:CONTENT|REFERENCE).*\]/i;
+    const hasUnfilledPlaceholders = placeholderRegex.test(cleanPaper);
 
     // OPTIMIZATION: Context Stripping / Strategic Extraction
     // We only send the Abstract, Introduction and Conclusion for analysis to save massive tokens.
@@ -722,9 +723,11 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
 
     // CHECK FOR PLACEHOLDERS IN INPUT CONTENT
     // This catches cases where the first pass failed to generate content.
-    const hasPlaceholders = paperContent.includes('[INSERT NEW CONTENT') || paperContent.includes('[INSERT REFERENCE');
+    const placeholderRegex = /\[INSERT.*(?:CONTENT|REFERENCE).*\]/i;
+    const hasPlaceholders = placeholderRegex.test(paperContent);
     
     let placeholderInstruction = "";
+    // If placeholders exist, we switch modes from "Improve" to "Complete the content"
     if (hasPlaceholders) {
         placeholderInstruction = `
     **🚨 CRITICAL ALERT: UNFINISHED CONTENT DETECTED 🚨**
