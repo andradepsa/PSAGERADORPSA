@@ -143,7 +143,7 @@ async function executeWithKeyRotation<T>(
             }
 
             // If it's not a quota error, or we ran out of keys, throw the error up
-            // Note: If we are on the last key and it fails with quota, the loop ends and we throw.
+            // Note: If we are on the last key and it fails on quota, the loop ends and we throw.
             if (attempt === maxAttempts - 1) {
                 // If this was the last key, we modify the error message to ensure App.tsx detects it as exhaustion
                 if (shouldRotate) {
@@ -228,18 +228,44 @@ async function callModel(
 
     if (model.startsWith('gemini-')) {
         // Wrap the generation logic in the rotation handler
-        return executeWithKeyRotation(async (aiClient) => {
-            return aiClient.models.generateContent({
-                model: model,
-                contents: userPrompt,
-                config: {
-                    systemInstruction: systemInstruction,
-                    ...(config.jsonOutput && { responseMimeType: "application/json" }),
-                    ...(config.responseSchema && { responseSchema: config.responseSchema }),
-                    ...(config.googleSearch && { tools: [{ googleSearch: {} }] }),
-                },
-            });
-        }, model);
+        try {
+            return await executeWithKeyRotation(async (aiClient) => {
+                return aiClient.models.generateContent({
+                    model: model,
+                    contents: userPrompt,
+                    config: {
+                        systemInstruction: systemInstruction,
+                        ...(config.jsonOutput && { responseMimeType: "application/json" }),
+                        ...(config.responseSchema && { responseSchema: config.responseSchema }),
+                        ...(config.googleSearch && { tools: [{ googleSearch: {} }] }),
+                    },
+                });
+            }, model);
+        } catch (error) {
+            const errStr = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+            const isQuotaExhausted = errStr.includes('exhausted') || errStr.includes('quota') || errStr.includes('limit') || errStr.includes('429');
+
+            // Fallback Logic requested: If gemini-2.5-flash fails due to quota, switch to gemini-2.0-flash
+            if (isQuotaExhausted && model === 'gemini-2.5-flash') {
+                const fallbackModel = 'gemini-2.0-flash';
+                console.warn(`[Gemini Service] Primary model ${model} quota exhausted. Falling back to ${fallbackModel} as requested.`);
+                
+                return await executeWithKeyRotation(async (aiClient) => {
+                    return aiClient.models.generateContent({
+                        model: fallbackModel,
+                        contents: userPrompt,
+                        config: {
+                            systemInstruction: systemInstruction,
+                            ...(config.jsonOutput && { responseMimeType: "application/json" }),
+                            ...(config.responseSchema && { responseSchema: config.responseSchema }),
+                            ...(config.googleSearch && { tools: [{ googleSearch: {} }] }),
+                        },
+                    });
+                }, fallbackModel);
+            }
+
+            throw error;
+        }
 
     } else if (model.startsWith('grok-')) {
         // Grok logic remains unchanged (single key support)
