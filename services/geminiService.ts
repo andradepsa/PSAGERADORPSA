@@ -334,19 +334,17 @@ function postProcessLatex(latexCode: string): string {
     
     // CRITICAL: Strip CJK (Chinese, Japanese, Korean) characters
     // The default pdflatex compiler does not support these characters and will crash.
-    // We remove them to ensure the paper compiles.
-    // Ranges:
-    // \u4e00-\u9fff (Common CJK)
-    // \u3400-\u4dbf (Extension A)
-    // \uf900-\ufaff (Compatibility)
-    // \u3040-\u309f (Hiragana)
-    // \u30a0-\u30ff (Katakana)
-    // \uac00-\ud7af (Hangul)
     code = code.replace(/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g, '');
 
     // REMOVE MICROTYPE to prevent timeouts on web-based compilers
-    // \usepackage{microtype} is a common cause of compilation timeouts due to heavy processing.
     code = code.replace(/\\usepackage(\[.*?\])?\{microtype\}/g, '% \\usepackage{microtype} removed to prevent timeout');
+
+    // SURGICAL FIX FOR TOPIC 30 (No Visuals & LaTeX Fixes)
+    // We programmatically strip figure and table environments and includegraphics commands
+    // to ensure the paper is text-only and compilation-safe.
+    code = code.replace(/\\includegraphics(\[.*?\])?\{.*?\}/g, '% \\includegraphics removed (No Visuals policy - Topic 30)');
+    code = code.replace(/\\begin\{figure\*?\}([\s\S]*?)\\end\{figure\*?\}/g, '% Figure environment removed (No Visuals policy - Topic 30)');
+    code = code.replace(/\\begin\{table\*?\}([\s\S]*?)\\end\{table\*?\}/g, '% Table environment removed (No Visuals policy - Topic 30)');
 
     return code;
 }
@@ -713,8 +711,12 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     2.  **Output:** Return valid LaTeX body (from \\begin{document} to \\end{document}). NO Preamble.
     3.  **Language:** **${languageName}**.
     4.  **Formatting:** NO \\bibitem. NO URLs. Use 'and' instead of '&'. NO CJK chars.
-    5.  **No Placeholders:** Search and replace any remaining placeholders with concrete data.
-    6.  **Safety:** Do not add \\newpage. Do not add images.
+    5.  **TOPIC 30 ENFORCEMENT:**
+        -   **NO VISUALS:** Do NOT generate \\begin{figure}, \\includegraphics, or \\begin{table}.
+        -   **MATH:** Ensure all math symbols (<, >, =, +, -) are inside $...$.
+        -   **ESCAPING:** Escape underscores (_) in text.
+    6.  **No Placeholders:** Search and replace any remaining placeholders with concrete data.
+    7.  **Safety:** Do not add \\newpage.
     `;
 
     // Strip comments to reduce input token usage, AI will rewrite content anyway
@@ -784,13 +786,16 @@ export async function fixLatexPaper(paperContent: string, compilationError: stri
     **Rules:**
     1.  **Precision:** Fix ONLY the error. Do not refactor.
     2.  **Output:** Full valid LaTeX document.
-    3.  **Specific Fixes:**
+    3.  **TOPIC 30 ENFORCEMENT (Visuals & Syntax):**
+        -   **NO VISUALS:** Remove all \\begin{figure}, \\includegraphics, \\begin{table}.
+        -   **MATH:** Fix "Missing $ inserted" by adding $ around math symbols (e.g., <, >, =, +, -).
+        -   **ESCAPING:** Escape underscores (_) as \\_ and percent (%) as \\% in text mode.
+    4.  **Specific Fixes:**
         -   Error "&": Replace with 'and'.
         -   Error "Unicode": Remove CJK chars (Chinese/Japanese).
         -   Error "Preamble": Simplify metadata if broken. Preserve \\author block.
         -   Error "Timeout": Remove \\usepackage{microtype}. Check for unclosed environments.
-    4.  **Prohibited:** NO \\bibitem, NO \\cite, NO URLs.
-    5.  **Optimization:** Remove \\usepackage{microtype} to avoid timeouts.
+    5.  **Prohibited:** NO \\bibitem, NO \\cite, NO URLs.
     `;
 
     const userPrompt = `Error:
