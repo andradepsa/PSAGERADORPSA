@@ -40,24 +40,24 @@ export const ARTICLE_TEMPLATE = `\\documentclass[12pt,a4paper]{article}
 \\onehalfspacing
 
 \\section{Introduction}
-[INSERT NEW CONTENT FOR INTRODUCTION SECTION HERE. The content must be extensive and detailed to meet the required page count. Invent specific background data if needed.]
+[INSERT NEW CONTENT FOR INTRODUCTION SECTION HERE. The content must be extensive and detailed to meet the required page count.]
 
 \\section{Literature Review}
 [INSERT NEW CONTENT FOR LITERATURE REVIEW SECTION HERE. The content must be extensive and detailed to meet the required page count.]
 
 \\section{Methodology}
-[INSERT NEW CONTENT FOR METHODOLOGY SECTION HERE. The content must be extensive and detailed. Invent specific algorithmic steps or experimental setups.]
+[INSERT NEW CONTENT FOR METHODOLOGY SECTION HERE. The content must be extensive and detailed to meet the required page count.]
 
 \\section{Results}
-[INSERT NEW CONTENT FOR RESULTS SECTION HERE. You MUST invent specific numerical results, accuracy percentages, p-values, and statistical data to support the paper's claims. Do NOT use placeholders like '[INSERT VALUE]' or '[XX%]', generate realistic numbers instead.]
+[INSERT NEW CONTENT FOR RESULTS SECTION HERE. The content must be extensive and detailed to meet the required page count.]
 
 \\section{Discussion}
-[INSERT NEW CONTENT FOR DISCUSSION SECTION HERE. Analyze the specific invented values from the Results section, comparing them with hypothetical or real baselines. Explain implications.]
+[INSERT NEW CONTENT FOR DISCUSSION SECTION HERE. The content must be extensive and detailed to meet the required page count.]
 
 \\section{Conclusion}
-[INSERT NEW CONTENT FOR CONCLUSION SECTION HERE. Summarize the specific findings.]
+[INSERT NEW CONTENT FOR CONCLUSION SECTION HERE. The content must be extensive and detailed to meet the required page count.]
 
-\\section{References}
+\\section{Referências}
 % The AI service will dynamically replace the placeholder below with [INSERT REFERENCE COUNT]
 % individual placeholders, one for each reference, separated by blank lines.
 % Each reference must be a plain paragraph starting with \\noindent and ending with \\par.
