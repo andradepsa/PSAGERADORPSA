@@ -42,7 +42,8 @@ export const ANALYSIS_TOPICS: AnalysisTopic[] = [
     { num: 13, name: 'STRUCTURE', desc: 'Organização geral do LaTeX.' },
     { num: 14, name: 'REFERENCES', desc: 'Formatação e relevância.' },
     { num: 17, name: 'TITLE-CONTENT ALIGNMENT', desc: 'Alinhamento entre título e conteúdo.' },
-    { num: 28, name: 'PAGE COUNT', desc: 'Adesão ao tamanho solicitado.' }
+    { num: 28, name: 'PAGE COUNT', desc: 'Adesão ao tamanho solicitado.' },
+    { num: 30, name: 'NO VISUALS & LATEX FIXES', desc: 'STRICT: Remove ALL figures, images, graphs, tables, flowcharts, and DIAGRAMS. Robustly fix "Missing $ inserted" and undefined environments.' }
 ];
 
 export const FIX_OPTIONS: { key: string; label: string; description: string }[] = [
