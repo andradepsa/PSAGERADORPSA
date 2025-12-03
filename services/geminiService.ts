@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Language, AnalysisResult, PaperSource, StyleGuide, SemanticScholarPaper, PersonalData } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, STYLE_GUIDES, SEMANTIC_SCHOLAR_API_BASE_URL } from '../constants';
@@ -105,7 +106,7 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
             return await apiCall();
-        } catch (error) {
+        } catch (error: any) {
             // If it's a quota error, throw immediately for the outer handler to catch and rotate.
             if (isRotationTrigger(error)) {
                 throw error;
@@ -140,7 +141,7 @@ async function executeApiCall<T>(
 
         try {
             return await withRateLimitHandling(() => operation(client, modelName, config));
-        } catch (error) {
+        } catch (error: any) {
             if (isRotationTrigger(error)) {
                 console.warn(`[API] Quota/Auth error detected. Error: ${error.message}`);
                 
@@ -225,7 +226,7 @@ export async function generatePaperTitle(topic: string, language: Language, disc
     const systemInstruction = `Act as an expert academic researcher in ${discipline}. Generate a single, compelling, high-impact scientific paper title.`;
     const userPrompt = `Topic: "${topic}" in ${discipline}.\nTask: Generate a single, novel, specific, high-impact research title.\nLanguage: **${languageName}**.\nConstraint: Return ONLY the title text. No quotes.`;
     
-    const response = await executeApiCall(
+    const response = await executeApiCall<GenerateContentResponse>(
         (client, modelName, config) => client.models.generateContent({ model: modelName, ...config }),
         { contents: userPrompt, config: { systemInstruction } },
         updateStatus
@@ -247,12 +248,12 @@ export async function generateInitialPaper(title: string, language: Language, pa
     const latexAuthorsBlock = authorDetails.map(author => `${author.name || 'Unknown Author'}${author.affiliation ? `\\\\ ${author.affiliation}` : ''}${author.orcid ? `\\\\ \\small ORCID: \\url{https://orcid.org/${author.orcid}}` : ''}`).join(' \\and\n');
     const pdfAuthorNames = authorDetails.map(a => a.name).filter(Boolean).join(', ');
 
-    const systemInstruction = `Act as a world-class AI specialized in generating LaTeX scientific papers. Write a complete, rigorous paper based on the title, strictly following the provided LaTeX template.\n\n**Rules:**\n1. **Use Template:** Fill all placeholders [INSERT...] with relevant content.\n2. **References:** Generate ${referenceCount} unique, **strictly academic citations**. Format as plain paragraphs (\\noindent ... \\par). NO \\bibitem. NO URLs.\n3. **Language:** Write in **${languageName}**.\n4. **Format:** Return valid LaTeX. NO ampersands (&). NO CJK characters.\n5. **Structure:** PRESERVE \\author/\\date verbatim.\n6. **Content:** Generate detailed content to meet ~${pageCount} pages.`;
+    const systemInstruction = `Act as a world-class AI specialized in generating LaTeX scientific papers. Write a complete, rigorous paper based on the title, strictly following the provided LaTeX template.\n\n**Rules:**\n1. **Use Template:** Fill all placeholders [INSERT...] with relevant content.\n2. **References:** Generate ${referenceCount} unique, **strictly academic citations**. Format as plain paragraphs (\\noindent ... \\par). NO \\bibitem. NO URLs.\n3. **Language:** Write in **${languageName}**.\n4. **Format:** Return valid LaTeX. NO ampersands (&) unless escaped (\\&). NO CJK characters. **Escape underscores (\\_) in text mode.**\n5. **Structure:** PRESERVE \\author/\\date verbatim.\n6. **Content:** Generate detailed content to meet ~${pageCount} pages.`;
     
     let templateWithBabelAndAuthor = ARTICLE_TEMPLATE.replace('% Babel package will be added dynamically based on language', `\\usepackage[${babelLanguage}]{babel}`).replace('[INSERT REFERENCE COUNT]', String(referenceCount)).replace('[INSERT NEW REFERENCE LIST HERE]', referencePlaceholders).replace('__ALL_AUTHORS_LATEX_BLOCK__', latexAuthorsBlock).replace('pdfauthor={__PDF_AUTHOR_NAMES_PLACEHOLDER__}', `pdfauthor={${pdfAuthorNames}}`);
     const userPrompt = `Title: "${title}".\n${semanticScholarContext}\n**Template:**\n\`\`\`latex\n${templateWithBabelAndAuthor}\n\`\`\``;
 
-    const response = await executeApiCall(
+    const response = await executeApiCall<GenerateContentResponse>(
         (client, modelName, config) => client.models.generateContent({ model: modelName, ...config }),
         { contents: userPrompt, config: { systemInstruction, tools: [{ googleSearch: {} }] } },
         updateStatus
@@ -284,7 +285,7 @@ export async function analyzePaper(paperContent: string, pageCount: number, upda
 
     const finalSystemInstruction = systemInstruction + truncationNote;
 
-    const response = await executeApiCall(
+    const response = await executeApiCall<GenerateContentResponse>(
         (client, modelName, config) => client.models.generateContent({ model: modelName, ...config }),
         { contents: paperToAnalyze, config: { systemInstruction: finalSystemInstruction, responseMimeType: "application/json", responseSchema } },
         updateStatus
@@ -308,7 +309,7 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
     const improvementPoints = analysis.analysis.filter(item => item.score < 8.5).map(item => `- **${ANALYSIS_TOPICS.find(t => t.num === item.topicNum)?.name || `TOPIC ${item.topicNum}`}:** ${item.improvement}`).join('\n');
 
-    const systemInstruction = `Act as an expert LaTeX editor. Refine the provided paper body based on suggestions.\n\n**Rules:**\n1. **Scope:** Improve ONLY the provided body content.\n2. **Output:** Return valid LaTeX body (from \\begin{document} to \\end{document}). NO Preamble.\n3. **Language:** **${languageName}**.\n4. **Formatting:** Use 'and' instead of '&'. NO CJK chars.\n5. **Placeholders:** Fill any remaining placeholders.`;
+    const systemInstruction = `Act as an expert LaTeX editor. Refine the provided paper body based on suggestions.\n\n**Rules:**\n1. **Scope:** Improve ONLY the provided body content.\n2. **Output:** Return valid LaTeX body (from \\begin{document} to \\end{document}). NO Preamble.\n3. **Language:** **${languageName}**.\n4. **Formatting:** Use 'and' instead of '&'. NO CJK chars. Escape underscores (\\_).\n5. **Placeholders:** Fill any remaining placeholders.`;
     
     const cleanPaper = stripLatexComments(paperContent);
     const docStartIndex = cleanPaper.indexOf('\\begin{document}');
@@ -316,7 +317,7 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
 
     const userPrompt = `Context (Preamble - DO NOT EDIT/OUTPUT THIS):\n${preamble}\n\nBody to Improve:\n${bodyToImprove}\n\nFeedback to Apply:\n${improvementPoints}\n\nTask: Return the COMPLETE, IMPROVED body starting with \\begin{document}.`;
 
-    const response = await executeApiCall(
+    const response = await executeApiCall<GenerateContentResponse>(
         (client, modelName, config) => client.models.generateContent({ model: modelName, ...config }),
         { contents: userPrompt, config: { systemInstruction } },
         updateStatus
@@ -330,10 +331,24 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
 }
 
 export async function fixLatexPaper(paperContent: string, compilationError: string, updateStatus: (message: string) => void): Promise<string> {
-    const systemInstruction = `Act as an expert LaTeX debugger. Fix compilation errors.\n\n**Rules:**\n1. **Precision:** Fix ONLY the error. Do not refactor.\n2. **Output:** Full valid LaTeX document.\n3. **Specific Fixes:** Error "&": Replace with 'and'. Error "Unicode": Remove CJK chars.\n4. **Prohibited:** NO \\bibitem, NO \\cite, NO URLs.`;
+    const systemInstruction = `Act as an expert LaTeX debugger. Fix compilation errors in the provided LaTeX code.
+
+**Common Fix Strategies:**
+1. **"Missing $ inserted"**: Usually caused by unescaped underscores (e.g., "X_cf") in text mode. FIX: Escape them ("X\\_cf") or wrap in math mode ("$X_{cf}$").
+2. **"Environment axis undefined"**: The code uses \\begin{axis} but misses \\usepackage{pgfplots}. FIX: Add \\usepackage{pgfplots} and \\pgfplotsset{compat=1.17} to the preamble.
+3. **"Environment ... undefined"**: Add the missing package (e.g., tikz, algorithm).
+4. **"Unicode character"**: Remove or replace unsupported characters.
+5. **"File not found"**: If an image/bibliography file is missing, comment out the include command or replace with a placeholder.
+
+**Rules:**
+- Fix ONLY the error reported in the log.
+- Do not remove content unless it's the source of the error and unfixable.
+- Return the FULL, VALID LaTeX document.
+- DO NOT use \\bibitem or \\bibliography. Keep references as plain text lists.`;
+    
     const userPrompt = `Error:\n\`\`\`\n${compilationError}\n\`\`\`\n\nCode:\n\`\`\`latex\n${paperContent}\n\`\`\``;
     
-    const response = await executeApiCall(
+    const response = await executeApiCall<GenerateContentResponse>(
         (client, modelName, config) => client.models.generateContent({ model: modelName, ...config }),
         { contents: userPrompt, config: { systemInstruction } },
         updateStatus
@@ -352,7 +367,7 @@ export async function reformatPaperWithStyleGuide(paperContent: string, styleGui
     const systemInstruction = `Act as academic editor. Reformat ONLY the References section.\n\n**Rules:**\n1. **Style:** ${styleGuideInfo.name}.\n2. **Scope:** Edit ONLY content in \\section{References}. Keep preamble/body exact.\n3. **Format:** Plain list. NO \\bibitem. NO URLs.\n4. **Output:** Full LaTeX document.`;
     const userPrompt = `Reformat references to ${styleGuideInfo.name}.\n\n**Document:**\n\`\`\`latex\n${paperContent}\n\`\`\``;
 
-    const response = await executeApiCall(
+    const response = await executeApiCall<GenerateContentResponse>(
         (client, modelName, config) => client.models.generateContent({ model: modelName, ...config }),
         { contents: userPrompt, config: { systemInstruction } },
         updateStatus
