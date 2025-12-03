@@ -14,7 +14,7 @@ export const ANALYSIS_TOPICS: AnalysisTopic[] = [
     { num: 10, name: 'CONCLUSION QUALITY', desc: 'Resumo de achados e trabalhos futuros.' },
     { num: 11, name: 'ARGUMENTATION STRENGTH', desc: 'Lógica e evidências.' },
     { num: 12, name: 'COHERENCE AND FLOW', desc: 'Transições suaves entre seções.' },
-    { num: 13, name: 'STRUCTURE', desc: 'Organização geral do LaTeX.' },
+    { num: 13, name: 'STRUCTURE', desc: 'Estrutura LaTeX.' },
     { num: 14, name: 'REFERENCES', desc: 'Formatação e relevância.' },
     { num: 15, name: 'SCOPE AND BOUNDARIES', desc: 'Definição clara do escopo.' },
     { num: 16, name: 'SCIENTIFIC HONESTY', desc: 'Transparência e evitar plágio.' },
@@ -29,5 +29,6 @@ export const ANALYSIS_TOPICS: AnalysisTopic[] = [
     { num: 26, name: 'SCIENTIFIC CONTENT ACCURACY', desc: 'Precisão das informações científicas.' },
     { num: 27, name: 'DEPTH OF CRITICAL ANALYSIS', desc: 'Profundidade da análise crítica.' },
     { num: 28, name: 'PAGE COUNT', desc: 'Adesão ao tamanho solicitado.' },
-    { num: 29, name: 'NO PLACEHOLDERS', desc: 'Garantir a substituição de todos os placeholders por conteúdo real.' }
+    { num: 29, name: 'NO PLACEHOLDERS', desc: 'Garantir a substituição de todos os placeholders por conteúdo real.' },
+    { num: 30, name: 'NO VISUAL ELEMENTS & SYNTAX FIX', desc: 'REMOVER estritamente todas as Figuras/Tabelas. CORRIGIR CRITICAMENTE underscores (_) não escapados dentro de comandos de texto (ex: transformar \text{model_size} em \text{model\_size}) para evitar falhas fatais de compilação.' }
 ];
