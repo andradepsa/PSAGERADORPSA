@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Language, AnalysisResult, PaperSource, StyleGuide, SemanticScholarPaper, PersonalData } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES, SEMANTIC_SCHOLAR_API_BASE_URL } from '../constants';
@@ -355,6 +354,7 @@ function postProcessLatex(latexCode: string): string {
     // Remove algorithm/listing environments if present
     code = code.replace(/\\begin\{algorithm\*?\}([\s\S]*?)\\end\{algorithm\*?\}/gi, '');
     code = code.replace(/\\begin\{listing\*?\}([\s\S]*?)\\end\{listing\*?\}/gi, '');
+    code = code.replace(/\\begin\{tikzpicture\}([\s\S]*?)\\end\{tikzpicture\}/gi, '');
 
     return code;
 }
@@ -496,8 +496,7 @@ export async function generateInitialPaper(title: string, language: Language, pa
 6.  **Content:** Generate detailed content for each section to meet ~${pageCount} pages.
 7.  **TOPIC 30 ENFORCEMENT (MANDATORY):**
     -   **NO VISUALS:** Do NOT generate any environments like \\begin{figure}, \\begin{table}, or \\includegraphics. Use TEXT ONLY descriptions if needed.
-    -   **MATH ERROR FIX:** The error "Missing $ inserted" is common. Ensure ALL math symbols (e.g., <, >, =, +, -) and variables are wrapped in $...$ (e.g., $n=5$, $p < 0.05$).
-    -   **ESCAPING:** You MUST escape underscores in text mode (e.g., "random\\_forest" not "random_forest").
+    -   **CRITICAL SYNTAX RULE:** You MUST escape underscores in text mode (e.g., "variable\\_name" NOT "variable_name"). Do not use raw underscores unless in a math block ($x_i$). This avoids "Missing $ inserted" errors.
 `;
 
     // Dynamically insert the babel package and reference placeholders into the template for the prompt
@@ -727,8 +726,8 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     4.  **Formatting:** NO \\bibitem. NO URLs. Use 'and' instead of '&'. NO CJK chars.
     5.  **TOPIC 30 ENFORCEMENT (STRICT):**
         -   **NO VISUALS:** Do NOT generate \\begin{figure}, \\includegraphics, or \\begin{table}.
-        -   **MATH:** Ensure all math symbols (<, >, =, +, -) are inside $...$.
-        -   **ESCAPING:** Escape underscores (_) in text mode (use \\_) unless they are math variables inside $...$.
+        -   **MATH / MISSING $:** Ensure all math symbols (<, >, =, +, -) are inside $...$.
+        -   **UNDERSCORES:** You MUST escape underscores (_) in text mode (use \\_) unless they are math variables inside $...$. This is critical to prevent "Missing $ inserted" errors.
     6.  **No Placeholders:** Search and replace any remaining placeholders with concrete data.
     7.  **Safety:** Do not add \\newpage.
     `;
@@ -799,7 +798,7 @@ export async function fixLatexPaper(paperContent: string, compilationError: stri
 
     **CRITICAL PRIORITY: TOPIC 30 ENFORCEMENT**
     1.  **NO VISUALS:** DELETE all \\begin{figure} ... \\end{figure}, \\begin{table} ... \\end{table}, \\includegraphics{...}, \\begin{algorithm} ... \\end{algorithm}. Do NOT comment them out, DELETE them.
-    2.  **MATH/UNDERSCORES:** The error "Missing $ inserted" is frequently caused by unescaped underscores in text mode. You MUST escape them (\\_) OR wrap the variable in math mode ($...$) if it is a formula. Check context lines in the log.
+    2.  **MATH/UNDERSCORES:** The error "Missing $ inserted" is frequently caused by unescaped underscores in text mode (e.g. "variable_name"). You MUST escape them (variable\\_name) OR wrap the variable in math mode ($variable_name$) if it is a formula. Check context lines in the log.
     3.  **MATH SYMBOLS:** Ensure <, >, +, -, = are inside $...$ if used mathematically.
 
     **General Rules:**
