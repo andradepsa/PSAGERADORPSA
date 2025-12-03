@@ -340,13 +340,21 @@ function postProcessLatex(latexCode: string): string {
     code = code.replace(/\\usepackage(\[.*?\])?\{microtype\}/g, '% \\usepackage{microtype} removed to prevent timeout');
 
     // SURGICAL FIX FOR TOPIC 30 (No Visuals & LaTeX Fixes)
-    // We programmatically strip figure and table environments and includegraphics commands
+    // We programmatically STRIP AND DELETE figure and table environments and includegraphics commands
     // to ensure the paper is text-only and compilation-safe.
-    code = code.replace(/\\includegraphics(\[.*?\])?\{.*?\}/g, '% \\includegraphics removed (Topic 30)');
-    code = code.replace(/\\begin\{figure\*?\}([\s\S]*?)\\end\{figure\*?\}/g, '% Figure environment removed (Topic 30)');
-    code = code.replace(/\\begin\{table\*?\}([\s\S]*?)\\end\{table\*?\}/g, '% Table environment removed (Topic 30)');
-    code = code.replace(/\\begin\{algorithm\*?\}([\s\S]*?)\\end\{algorithm\*?\}/g, '% Algorithm environment removed (Topic 30)');
-    code = code.replace(/\\begin\{listing\*?\}([\s\S]*?)\\end\{listing\*?\}/g, '% Listing environment removed (Topic 30)');
+    
+    // Remove \includegraphics commands
+    code = code.replace(/\\includegraphics(\[.*?\])?\{.*?\}/gi, '');
+    
+    // Remove figure environments
+    code = code.replace(/\\begin\{figure\*?\}([\s\S]*?)\\end\{figure\*?\}/gi, '');
+    
+    // Remove table environments
+    code = code.replace(/\\begin\{table\*?\}([\s\S]*?)\\end\{table\*?\}/gi, '');
+    
+    // Remove algorithm/listing environments if present
+    code = code.replace(/\\begin\{algorithm\*?\}([\s\S]*?)\\end\{algorithm\*?\}/gi, '');
+    code = code.replace(/\\begin\{listing\*?\}([\s\S]*?)\\end\{listing\*?\}/gi, '');
 
     return code;
 }
@@ -486,10 +494,10 @@ export async function generateInitialPaper(title: string, language: Language, pa
 4.  **Format:** Return valid LaTeX. NO ampersands (&) in text (use 'and'). NO CJK characters. Escape special chars (%, _, $).
 5.  **Structure:** Do NOT change commands. PRESERVE \\author/\\date verbatim.
 6.  **Content:** Generate detailed content for each section to meet ~${pageCount} pages.
-7.  **TOPIC 30 ENFORCEMENT:**
-    -   **NO VISUALS:** Do NOT generate \\begin{figure}, \\includegraphics, or \\begin{table}.
-    -   **MATH:** Ensure all math symbols (<, >, =, +, -) are inside $...$.
-    -   **ESCAPING:** Escape underscores (_) in text mode (\\_) or wrap in math mode if variable.
+7.  **TOPIC 30 ENFORCEMENT (MANDATORY):**
+    -   **NO VISUALS:** Do NOT generate any environments like \\begin{figure}, \\begin{table}, or \\includegraphics. Use TEXT ONLY descriptions if needed.
+    -   **MATH ERROR FIX:** The error "Missing $ inserted" is common. Ensure ALL math symbols (e.g., <, >, =, +, -) and variables are wrapped in $...$ (e.g., $n=5$, $p < 0.05$).
+    -   **ESCAPING:** You MUST escape underscores in text mode (e.g., "random\\_forest" not "random_forest").
 `;
 
     // Dynamically insert the babel package and reference placeholders into the template for the prompt

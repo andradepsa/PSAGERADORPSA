@@ -31,5 +31,5 @@ export const ANALYSIS_TOPICS: AnalysisTopic[] = [
     { num: 27, name: 'DEPTH OF CRITICAL ANALYSIS', desc: 'Profundidade da análise crítica.' },
     { num: 28, name: 'PAGE COUNT', desc: 'Adesão ao tamanho solicitado.' },
     { num: 29, name: 'NO PLACEHOLDERS', desc: 'Garantir a substituição de todos os placeholders por conteúdo real.' },
-    { num: 30, name: 'NO VISUALS & LATEX FIXES', desc: 'REMOVER TODAS AS FIGURAS, IMAGENS, GRÁFICOS, TABELAS E FLUXOGRAMAS. Corrigir erro "Missing $ inserted" escapando underscores (_) ou usando modo matemático.' }
+    { num: 30, name: 'NO VISUALS & LATEX FIXES', desc: 'STRICT: Remove ALL figures, images, graphs, tables, and flowcharts. Robustly fix "Missing $ inserted" by escaping underscores (_) and ensuring math mode correctness.' }
 ];
