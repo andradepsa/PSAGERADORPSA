@@ -72,18 +72,6 @@ export const FIX_OPTIONS: { key: string; label: string; description: string }[] 
     }
 ];
 
-export const DISCIPLINE_AUTHORS: Record<string, string> = {
-    "Mathematics": "MATH, 10",
-    "History of Humanity": "HISTORY, 10",
-    "Geography": "GEOGRAPHY, 10",
-    "Biology": "BIOLOGY, 10",
-    "Chemistry": "CHEMISTRY, 10",
-    "Physics": "PHYSICS, 10",
-    "Astronomy & Astrophysics": "ASTRO, 10",
-    "Philosophy": "PHILOSOPHY, 10",
-    "Literature": "LITERATURE, 10"
-};
-
 export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
   "History of Humanity": [
     // Pré-história e evolução humana

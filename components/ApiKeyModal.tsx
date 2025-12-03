@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 interface ApiKeyModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onSave: (keys: { gemini: string[], zenodo: string, xai: string }) => void;
+    onSave: (keys: { gemini: string, zenodo: string, xai: string }) => void;
 }
 
 const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave }) => {
@@ -13,27 +13,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave }) =>
 
     useEffect(() => {
         if (isOpen) {
-            // Load keys - handle backward compatibility
-            const storedGeminiKeys = localStorage.getItem('gemini_api_keys');
-            const storedSingleKey = localStorage.getItem('gemini_api_key');
-
-            if (storedSingleKey) {
-                setGeminiKey(storedSingleKey);
-            } else if (storedGeminiKeys) {
-                try {
-                    const parsed = JSON.parse(storedGeminiKeys);
-                    if (Array.isArray(parsed) && parsed.length > 0) {
-                        setGeminiKey(parsed[0]);
-                    } else {
-                        setGeminiKey('');
-                    }
-                } catch {
-                    setGeminiKey('');
-                }
-            } else {
-                setGeminiKey('');
-            }
-
+            setGeminiKey(localStorage.getItem('gemini_api_key') || '');
             setZenodoKey(localStorage.getItem('zenodo_api_key') || '');
             setXaiKey(localStorage.getItem('xai_api_key') || '');
         }
@@ -42,16 +22,12 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave }) =>
     if (!isOpen) return null;
 
     const handleSave = () => {
-        // Pass as single-item array to maintain compatibility with App.tsx and Service logic
-        const validKey = geminiKey.trim();
-        const geminiKeys = validKey ? [validKey] : [];
-        
-        onSave({ gemini: geminiKeys, zenodo: zenodoKey, xai: xaiKey });
+        onSave({ gemini: geminiKey, zenodo: zenodoKey, xai: xaiKey });
     };
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4" aria-modal="true" role="dialog">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md transform transition-all duration-300 p-8 max-h-[90vh] overflow-y-auto">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md transform transition-all duration-300 p-8">
                 <div className="flex justify-between items-center mb-6">
                     <h2 className="text-2xl font-bold text-gray-800">API Key Settings</h2>
                     <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors" aria-label="Close settings">
@@ -60,27 +36,24 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave }) =>
                 </div>
                 
                 <p className="text-gray-600 mb-6">
-                    Configure your API keys for the application.
+                    Enter your API keys below. They will be saved in your browser's local storage for future use.
                 </p>
                 
-                <div className="space-y-6">
+                <div className="space-y-4">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label htmlFor="gemini-key" className="block text-sm font-medium text-gray-700 mb-1">
                             🔑 Gemini API Key
                         </label>
                         <input
+                            id="gemini-key"
                             type="password"
                             value={geminiKey}
                             onChange={(e) => setGeminiKey(e.target.value)}
                             placeholder="Enter your Gemini API Key"
-                            className="block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                            className="block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
                         />
-                        <p className="text-xs text-gray-500 mt-2">
-                            Required for article generation.
-                        </p>
                     </div>
-
-                    <div className="border-t pt-4">
+                     <div>
                         <label htmlFor="xai-key" className="block text-sm font-medium text-gray-700 mb-1">
                            🤖 x.ai (Grok) API Key
                         </label>
@@ -92,8 +65,21 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave }) =>
                             placeholder="Enter your x.ai API Key"
                             className="block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
                         />
+                        <details className="text-xs text-gray-500 mt-1 cursor-pointer">
+                            <summary>API Request Example (cURL)</summary>
+                            <pre className="bg-gray-100 p-2 rounded mt-1 text-xs overflow-x-auto">
+                                <code>
+                                    {`curl https://api.x.ai/v1/chat/completions \\
+-H "Content-Type: application/json" \\
+-H "Authorization: Bearer YOUR_API_KEY" \\
+-d '{
+  "messages": [{"role": "user", "content": "..."}],
+  "model": "grok-4-latest"
+}'`}
+                                </code>
+                            </pre>
+                        </details>
                     </div>
-
                     <div>
                         <label htmlFor="zenodo-key" className="block text-sm font-medium text-gray-700 mb-1">
                             ☁️ Zenodo Token

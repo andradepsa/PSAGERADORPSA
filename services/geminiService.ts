@@ -10,153 +10,60 @@ const BABEL_LANG_MAP: Record<Language, string> = {
     fr: 'french',
 };
 
-// Internal Key Manager to track rotation state
-const KeyManager = {
-    keys: [] as string[],
-    currentIndex: 0,
-    initialized: false,
-
-    loadKeys: function() {
-        const storedKeys = localStorage.getItem('gemini_api_keys');
-        const legacyKey = localStorage.getItem('gemini_api_key') || (process.env.API_KEY as string);
-        
-        if (storedKeys) {
-            try {
-                const parsed = JSON.parse(storedKeys);
-                this.keys = Array.isArray(parsed) ? parsed.filter(k => k.trim() !== '') : [];
-            } catch {
-                this.keys = [];
-            }
-        }
-        
-        if (this.keys.length === 0 && legacyKey) {
-            this.keys = [legacyKey];
-        }
-
-        // Always check environment variable if keys list is still empty
-        if (this.keys.length === 0 && process.env.API_KEY) {
-             this.keys = [process.env.API_KEY];
-        }
-
-        this.initialized = true;
-    },
-
-    getCurrentKey: function(): string {
-        if (!this.initialized) this.loadKeys();
-        if (this.keys.length === 0) {
-            throw new Error("Gemini API key not found. Please add keys in the settings modal (gear icon).");
-        }
-        return this.keys[this.currentIndex];
-    },
-
-    rotate: function(): boolean {
-        if (this.keys.length <= 1) return false;
-        
-        const prevIndex = this.currentIndex;
-        this.currentIndex = (this.currentIndex + 1) % this.keys.length;
-        console.warn(`🔄 Rotating API Key: Switching from index ${prevIndex} to ${this.currentIndex}`);
-        return true;
-    }
-};
-
+const MAX_RETRIES = 5;
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Wrapper to create client with the CURRENT active key
+// Creates a new Gemini client instance, reading the API key from localStorage
+// with a fallback to process.env for environments where it's set.
 function getAiClient(): GoogleGenAI {
-    const apiKey = KeyManager.getCurrentKey();
+    const apiKey = localStorage.getItem('gemini_api_key') || (process.env.API_KEY as string);
+    if (!apiKey) {
+        throw new Error("Gemini API key not found. Please set it in the settings modal (gear icon).");
+    }
     return new GoogleGenAI({ apiKey });
 }
 
-// Executes an AI model call with automatic key rotation on Quota/429 errors
-async function executeWithKeyRotation<T>(
-    operation: (client: GoogleGenAI) => Promise<T>, 
-    modelName: string
-): Promise<T> {
-    
-    // Refresh keys from storage in case user added one mid-process
-    KeyManager.loadKeys(); 
-
-    // We allow trying each key once before giving up entirely on this specific request.
-    const maxAttempts = KeyManager.keys.length > 0 ? KeyManager.keys.length : 1;
-    
-    // However, if we only have 1 key, we still want to retry transient errors a few times.
-    // The inner retry logic inside `withRateLimitHandling` handles transient 500s/429s.
-    // This outer loop handles "Hard Quota" or "Persistent 429" by switching keys.
-    
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        try {
-            const client = getAiClient();
-            return await withRateLimitHandling(() => operation(client));
-        } catch (error) {
-            const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
-            
-            // Check if error is related to quota or exhaustion
-            const isQuotaError = 
-                errorMessage.includes('429') || 
-                errorMessage.includes('quota') || 
-                errorMessage.includes('limit') || 
-                errorMessage.includes('exhausted');
-
-            // If it's a quota error and we have more keys, rotate and continue loop
-            if (isQuotaError && KeyManager.keys.length > 1) {
-                console.warn(`⚠️ API Key (Index ${KeyManager.currentIndex}) exhausted. Attempting to rotate...`);
-                KeyManager.rotate();
-                // We do NOT wait here; we switch keys and try immediately.
-                continue; 
-            }
-
-            // If it's not a quota error, or we ran out of keys, throw the error up
-            // Note: If we are on the last key and it fails with quota, the loop ends and we throw.
-            if (attempt === maxAttempts - 1) {
-                throw error;
-            }
-            
-            throw error; // Non-quota errors (like 400 Bad Request) shouldn't rotate keys usually.
-        }
-    }
-    
-    throw new Error("Unexpected end of key rotation loop.");
-}
-
 async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
-    const MAX_RETRIES = 5; // Increased retries to handle 503 instability better
-    
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
             return await apiCall(); // Success!
         } catch (error) {
+            console.warn(`API call failed on attempt ${attempt}.`, error);
             const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
             
-            // Hard failure for model non-existence or strict 0 quota
+            // Check for hard failure (Quota limit: 0)
+            // This specifically handles the case where the user tries to use a model (like gemini-3)
+            // that isn't enabled or has 0 quota on their plan.
             if (errorMessage.includes('limit: 0') || errorMessage.includes('quota exceeded for metric')) {
-                 throw new Error(`API Quota Exceeded (Limit: 0) or Model Unavailable: ${errorMessage}`);
+                 throw new Error("API Quota Exceeded (Limit: 0). This model appears to be unavailable for your API key/Tier. Please select a different model (e.g., Gemini 2.5 Pro) in the settings.");
             }
 
-            // If it's the last attempt, propagate error so rotation logic can catch it
             if (attempt === MAX_RETRIES) {
-                if (errorMessage.includes('429') || errorMessage.includes('quota')) {
-                    throw new Error(`Quota Exceeded (429): ${errorMessage}`);
+                 if (errorMessage.includes('429') || errorMessage.includes('quota')) {
+                    throw new Error("You exceeded your current quota. Please wait a minute before trying again. For higher limits, check your plan and billing details.");
                  }
                  if (errorMessage.includes('503') || errorMessage.includes('overloaded')) {
                     throw new Error("The AI model is temporarily overloaded. Please try again in a few moments.");
                  }
-                throw error;
+                throw new Error("Failed to call the API after multiple attempts. Please check your connection and try again later.");
             }
 
             let backoffTime;
+            
             if (errorMessage.includes('429') || errorMessage.includes('quota')) {
-                // If it's a 429, we might just need to wait a bit if it's rate limit vs quota.
-                backoffTime = 2000 + Math.random() * 1000;
+                console.log("Rate limit exceeded. Waiting for 61 seconds before retrying...");
+                backoffTime = 61000 + Math.random() * 1000;
             } else {
                 console.log("Transient error detected. Using exponential backoff...");
-                backoffTime = Math.pow(2, attempt) * 1000 + Math.random() * 500;
+                backoffTime = Math.pow(2, attempt) * 1000 + Math.random() * 250;
             }
             
-            console.log(`Waiting for ${backoffTime.toFixed(0)}ms before retrying on same key...`);
+            console.log(`Waiting for ${backoffTime.toFixed(0)}ms before retrying...`);
             await delay(backoffTime);
         }
     }
-    throw new Error("API call failed after internal retries.");
+    // This should be unreachable
+    throw new Error("API call failed after all retry attempts.");
 }
 
 // Central dispatcher for different AI models
@@ -171,22 +78,19 @@ async function callModel(
     } = {}
 ): Promise<GenerateContentResponse> {
     if (model.startsWith('gemini-')) {
-        // Wrap the generation logic in the rotation handler
-        return executeWithKeyRotation(async (aiClient) => {
-            return aiClient.models.generateContent({
-                model: model,
-                contents: userPrompt,
-                config: {
-                    systemInstruction: systemInstruction,
-                    ...(config.jsonOutput && { responseMimeType: "application/json" }),
-                    ...(config.responseSchema && { responseSchema: config.responseSchema }),
-                    ...(config.googleSearch && { tools: [{ googleSearch: {} }] }),
-                },
-            });
-        }, model);
-
+        const ai = getAiClient();
+        const apiCall = () => ai.models.generateContent({
+            model: model,
+            contents: userPrompt,
+            config: {
+                systemInstruction: systemInstruction,
+                ...(config.jsonOutput && { responseMimeType: "application/json" }),
+                ...(config.responseSchema && { responseSchema: config.responseSchema }),
+                ...(config.googleSearch && { tools: [{ googleSearch: {} }] }),
+            },
+        });
+        return withRateLimitHandling(apiCall);
     } else if (model.startsWith('grok-')) {
-        // Grok logic remains unchanged (single key support)
         const apiKey = localStorage.getItem('xai_api_key');
         if (!apiKey) {
             throw new Error("x.ai API key not found. Please set it in the settings modal (gear icon).");
@@ -220,13 +124,14 @@ async function callModel(
             const data = await response.json();
             const text = data.choices?.[0]?.message?.content || '';
             
+            // Reconstruct a Gemini-like response object for compatibility
             const reconstructedResponse = {
                 candidates: [{
                     content: { parts: [{ text: text }], role: 'model' },
                     finishReason: 'STOP',
                     index: 0,
                     safetyRatings: [],
-                    groundingMetadata: { groundingChunks: [] }
+                    groundingMetadata: { groundingChunks: [] } // Grok does not support grounding
                 }],
                 functionCalls: [],
                 get text() {
@@ -260,13 +165,9 @@ export async function generatePaperTitle(topic: string, language: Language, mode
 
     const response = await callModel(model, systemInstruction, userPrompt);
     
-    if (!response.candidates || response.candidates.length === 0) {
-        throw new Error("AI returned no candidates for title. Prompt likely blocked by safety filters.");
-    }
-    
     // Safety check for empty response
     if (!response.text) {
-         throw new Error("AI returned an empty response text for the title generation.");
+        throw new Error("AI returned an empty response for the title generation.");
     }
     
     return response.text.trim().replace(/"/g, ''); // Clean up any accidental quotes
@@ -283,7 +184,6 @@ function postProcessLatex(latexCode: string): string {
 
 /**
  * Fetches papers from the Semantic Scholar API based on a query.
- * PROXIED to avoid CORS issues in the browser.
  * @param query The search query string (e.g., paper title).
  * @param limit The maximum number of papers to fetch.
  * @returns A promise that resolves to an array of SemanticScholarPaper objects.
@@ -291,13 +191,11 @@ function postProcessLatex(latexCode: string): string {
 async function fetchSemanticScholarPapers(query: string, limit: number = 5): Promise<SemanticScholarPaper[]> {
     try {
         const fields = 'paperId,title,authors,abstract,url'; // Requesting specific fields
-        
-        // Use the local proxy instead of direct call
-        const response = await fetch(`/semantic-proxy?query=${encodeURIComponent(query)}&limit=${limit}&fields=${fields}`);
+        const response = await fetch(`${SEMANTIC_SCHOLAR_API_BASE_URL}?query=${encodeURIComponent(query)}&limit=${limit}&fields=${fields}`);
 
         if (!response.ok) {
             const errorText = await response.text();
-            throw new Error(`Semantic Scholar API error (via Proxy): ${response.status} - ${errorText}`);
+            throw new Error(`Semantic Scholar API error: ${response.status} - ${errorText}`);
         }
 
         const data = await response.json();
@@ -398,16 +296,9 @@ ${templateWithBabelAndAuthor}
 
     const response = await callModel(model, systemInstruction, userPrompt, { googleSearch: true });
     
-    // Detailed error reporting for empty responses
-    if (!response.candidates || response.candidates.length === 0) {
-        throw new Error("AI returned no candidates. This usually means the model refused the prompt (safety/policy).");
-    }
-    
+    // Safety check
     if (!response.text) {
-        const candidate = response.candidates[0];
-        const reason = candidate.finishReason || 'UNKNOWN';
-        const safetyRatings = candidate.safetyRatings?.map(r => `${r.category}: ${r.probability}`).join(', ') || 'None';
-        throw new Error(`AI returned an empty text response. Finish Reason: ${reason}. Safety Ratings: [${safetyRatings}].`);
+        throw new Error("AI returned an empty response for the paper generation.");
     }
 
     let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
@@ -494,10 +385,6 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
         responseSchema: responseSchema
     });
     
-    if (!response.candidates || response.candidates.length === 0) {
-        throw new Error("AI returned no candidates for analysis.");
-    }
-
     // Safety check
     if (!response.text) {
         throw new Error("AI returned an empty response for the analysis.");
@@ -547,10 +434,6 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     const userPrompt = `Current Paper Content:\n\n${paperContent}\n\nImprovement Points:\n\n${improvementPoints}\n\nBased on the above improvement points, provide the complete, improved LaTeX source code for the paper.`;
 
     const response = await callModel(model, systemInstruction, userPrompt);
-    
-    if (!response.candidates || response.candidates.length === 0) {
-        throw new Error("AI returned no candidates for improvement.");
-    }
     
     // Safety check
     if (!response.text) {

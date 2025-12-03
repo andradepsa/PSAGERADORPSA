@@ -37,6 +37,8 @@ const ZenodoUploader = forwardRef<ZenodoUploaderRef, ZenodoUploaderProps>(({
         setPublicationLog(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`]);
     };
     
+    // Removed handleFileChange as file comes from App.tsx
+
     const submit = async () => {
         if (!compiledPdfFile) {
             const errorMsg = "Error: No PDF file has been provided for upload. Please compile or upload one in the previous step.";
@@ -56,17 +58,14 @@ const ZenodoUploader = forwardRef<ZenodoUploaderRef, ZenodoUploaderProps>(({
         setPublicationLog([]); // Clear previous logs
         log("Initiating publication to Zenodo...");
 
-        const ZENODO_API_URL_BASE = useSandbox 
+        const ZENODO_API_URL = useSandbox 
             ? 'https://sandbox.zenodo.org/api' 
             : 'https://zenodo.org/api';
-        
-        // Helper to wrap URL with proxy
-        const proxied = (url: string) => `/zenodo-proxy?target=${encodeURIComponent(url)}`;
 
         try {
             // Step 1: Create a new deposition
             log("Step 1: Creating a new deposition...");
-            const dep_res = await fetch(proxied(`${ZENODO_API_URL_BASE}/deposit/depositions`), {
+            const dep_res = await fetch(`${ZENODO_API_URL}/deposit/depositions`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${zenodoToken}` },
                 body: JSON.stringify({})
@@ -89,8 +88,7 @@ const ZenodoUploader = forwardRef<ZenodoUploaderRef, ZenodoUploaderProps>(({
             const formData = new FormData();
             formData.append('file', compiledPdfFile, compiledPdfFile.name);
 
-            // Use the file upload URL, passed through proxy
-            const file_res = await fetch(proxied(filesUrl), {
+            const file_res = await fetch(filesUrl, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${zenodoToken}` }, // Content-Type is not needed with FormData
                 body: formData
@@ -118,7 +116,7 @@ const ZenodoUploader = forwardRef<ZenodoUploaderRef, ZenodoUploaderProps>(({
                     keywords: keywords.split(',').map(k => k.trim()).filter(k => k.length > 0)
                 }
             };
-            const meta_res = await fetch(proxied(`${ZENODO_API_URL_BASE}/deposit/depositions/${depositionId}`), {
+            const meta_res = await fetch(`${ZENODO_API_URL}/deposit/depositions/${depositionId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${zenodoToken}` },
                 body: JSON.stringify(metadata)
@@ -131,7 +129,7 @@ const ZenodoUploader = forwardRef<ZenodoUploaderRef, ZenodoUploaderProps>(({
 
             // Step 4: Publish
             log("Step 4: Publishing the deposition...");
-            const pub_res = await fetch(proxied(`${ZENODO_API_URL_BASE}/deposit/depositions/${depositionId}/actions/publish`), {
+            const pub_res = await fetch(`${ZENODO_API_URL}/deposit/depositions/${depositionId}/actions/publish`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${zenodoToken}` }
             });
