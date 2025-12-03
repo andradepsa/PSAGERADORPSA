@@ -248,7 +248,7 @@ export async function generateInitialPaper(title: string, language: Language, pa
     const latexAuthorsBlock = authorDetails.map(author => `${author.name || 'Unknown Author'}${author.affiliation ? `\\\\ ${author.affiliation}` : ''}${author.orcid ? `\\\\ \\small ORCID: \\url{https://orcid.org/${author.orcid}}` : ''}`).join(' \\and\n');
     const pdfAuthorNames = authorDetails.map(a => a.name).filter(Boolean).join(', ');
 
-    const systemInstruction = `Act as a world-class AI specialized in generating LaTeX scientific papers. Write a complete, rigorous paper based on the title, strictly following the provided LaTeX template.\n\n**Rules:**\n1. **Use Template:** Fill all placeholders [INSERT...] with relevant content.\n2. **References:** Generate ${referenceCount} unique, **strictly academic citations**. Format as plain paragraphs (\\noindent ... \\par). NO \\bibitem. NO URLs.\n3. **Language:** Write in **${languageName}**.\n4. **Format:** Return valid LaTeX. NO ampersands (&) unless escaped (\\&). NO CJK characters. **Escape underscores (\\_) in text mode.**\n5. **Structure:** PRESERVE \\author/\\date verbatim.\n6. **Content:** Generate detailed content to meet ~${pageCount} pages.`;
+    const systemInstruction = `Act as a world-class AI specialized in generating LaTeX scientific papers. Write a complete, rigorous paper based on the title, strictly following the provided LaTeX template.\n\n**Rules:**\n1. **Use Template:** Fill all placeholders [INSERT...] with relevant content.\n2. **References:** Generate ${referenceCount} unique, **strictly academic citations**. Format as plain paragraphs (\\noindent ... \\par). NO \\bibitem. NO URLs.\n3. **Language:** Write in **${languageName}**.\n4. **Format:** Return valid LaTeX. NO ampersands (&) unless escaped (\\&). NO CJK characters. **Escape underscores (\\_) in text mode, especially in DOIs and URLs (e.g., 10.1007/abc\\_123).**\n5. **Structure:** PRESERVE \\author/\\date verbatim.\n6. **Content:** Generate detailed content to meet ~${pageCount} pages.`;
     
     let templateWithBabelAndAuthor = ARTICLE_TEMPLATE.replace('% Babel package will be added dynamically based on language', `\\usepackage[${babelLanguage}]{babel}`).replace('[INSERT REFERENCE COUNT]', String(referenceCount)).replace('[INSERT NEW REFERENCE LIST HERE]', referencePlaceholders).replace('__ALL_AUTHORS_LATEX_BLOCK__', latexAuthorsBlock).replace('pdfauthor={__PDF_AUTHOR_NAMES_PLACEHOLDER__}', `pdfauthor={${pdfAuthorNames}}`);
     const userPrompt = `Title: "${title}".\n${semanticScholarContext}\n**Template:**\n\`\`\`latex\n${templateWithBabelAndAuthor}\n\`\`\``;
@@ -309,7 +309,7 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
     const improvementPoints = analysis.analysis.filter(item => item.score < 8.5).map(item => `- **${ANALYSIS_TOPICS.find(t => t.num === item.topicNum)?.name || `TOPIC ${item.topicNum}`}:** ${item.improvement}`).join('\n');
 
-    const systemInstruction = `Act as an expert LaTeX editor. Refine the provided paper body based on suggestions.\n\n**Rules:**\n1. **Scope:** Improve ONLY the provided body content.\n2. **Output:** Return valid LaTeX body (from \\begin{document} to \\end{document}). NO Preamble.\n3. **Language:** **${languageName}**.\n4. **Formatting:** Use 'and' instead of '&'. NO CJK chars. Escape underscores (\\_).\n5. **Placeholders:** Fill any remaining placeholders.`;
+    const systemInstruction = `Act as an expert LaTeX editor. Refine the provided paper body based on suggestions.\n\n**Rules:**\n1. **Scope:** Improve ONLY the provided body content.\n2. **Output:** Return valid LaTeX body (from \\begin{document} to \\end{document}). NO Preamble.\n3. **Language:** **${languageName}**.\n4. **Formatting:** Use 'and' instead of '&'. NO CJK chars. Escape underscores (\\_) in text mode (e.g., in DOIs/URLs).\n5. **Placeholders:** Fill any remaining placeholders.`;
     
     const cleanPaper = stripLatexComments(paperContent);
     const docStartIndex = cleanPaper.indexOf('\\begin{document}');
@@ -334,7 +334,7 @@ export async function fixLatexPaper(paperContent: string, compilationError: stri
     const systemInstruction = `Act as an expert LaTeX debugger. Fix compilation errors in the provided LaTeX code.
 
 **Common Fix Strategies:**
-1. **"Missing $ inserted"**: Usually caused by unescaped underscores (e.g., "X_cf") in text mode. FIX: Escape them ("X\\_cf") or wrap in math mode ("$X_{cf}$").
+1. **"Missing $ inserted"**: Usually caused by unescaped underscores (e.g., "X_cf", "DOI: ..._...") in text mode. FIX: Escape them ("X\\_cf", "10.1007/...\\_...") or wrap DOIs/URLs in \\url{...} (e.g., \\url{https://doi.org/..._...}).
 2. **"Environment axis undefined"**: The code uses \\begin{axis} but misses \\usepackage{pgfplots}. FIX: Add \\usepackage{pgfplots} and \\pgfplotsset{compat=1.17} to the preamble.
 3. **"Environment ... undefined"**: Add the missing package (e.g., tikz, algorithm).
 4. **"Unicode character"**: Remove or replace unsupported characters.
@@ -364,7 +364,7 @@ export async function reformatPaperWithStyleGuide(paperContent: string, styleGui
     const styleGuideInfo = STYLE_GUIDES.find(g => g.key === styleGuide);
     if (!styleGuideInfo) throw new Error(`Unknown style guide: ${styleGuide}`);
 
-    const systemInstruction = `Act as academic editor. Reformat ONLY the References section.\n\n**Rules:**\n1. **Style:** ${styleGuideInfo.name}.\n2. **Scope:** Edit ONLY content in \\section{References}. Keep preamble/body exact.\n3. **Format:** Plain list. NO \\bibitem. NO URLs.\n4. **Output:** Full LaTeX document.`;
+    const systemInstruction = `Act as academic editor. Reformat ONLY the References section.\n\n**Rules:**\n1. **Style:** ${styleGuideInfo.name}.\n2. **Scope:** Edit ONLY content in \\section{References}. Keep preamble/body exact.\n3. **Format:** Plain list. NO \\bibitem. NO URLs (use \\url{} or escape characters). Escape underscores in DOIs (e.g., 10.1007/s40304-019-00179-2 -> 10.1007/s40304-019-00179-2 or 10.1007/s40304-019-00179\\_2).\n4. **Output:** Full LaTeX document.`;
     const userPrompt = `Reformat references to ${styleGuideInfo.name}.\n\n**Document:**\n\`\`\`latex\n${paperContent}\n\`\`\``;
 
     const response = await executeApiCall<GenerateContentResponse>(
