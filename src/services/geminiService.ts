@@ -339,6 +339,12 @@ function postProcessLatex(latexCode: string): string {
     // REMOVE MICROTYPE to prevent timeouts on web-based compilers
     code = code.replace(/\\usepackage(\[.*?\])?\{microtype\}/g, '% \\usepackage{microtype} removed to prevent timeout');
 
+    // FORCE REMOVAL OF BIBLIOGRAPHY ENVIRONMENTS (Common AI hallucination despite instructions)
+    // We convert \bibitem to simple \noindent paragraphs
+    code = code.replace(/\\begin\{thebibliography\}\{.*?\}/g, '');
+    code = code.replace(/\\end\{thebibliography\}/g, '');
+    code = code.replace(/\\bibitem\{.*?\}/g, '\n\n\\noindent ');
+
     // SURGICAL FIX FOR TOPIC 30 (No Visuals & LaTeX Fixes)
     // We programmatically STRIP AND DELETE figure and table environments and includegraphics commands
     // to ensure the paper is text-only and compilation-safe.
@@ -367,11 +373,12 @@ function postProcessLatex(latexCode: string): string {
         const [fullMatch, sectionHeader, content, endTag] = match;
         let cleanedContent = content;
 
-        // 1. Remove \url{...} commands
+        // 1. Remove \url{...} commands completely
         cleanedContent = cleanedContent.replace(/\\url\{[^}]+\}/g, '');
         
-        // 2. Remove \href{...}{...} commands
-        cleanedContent = cleanedContent.replace(/\\href\{[^}]+\}\{[^}]+\}/g, '');
+        // 2. Remove \href{url}{text} commands, keeping only the text
+        // This regex captures the second brace content (text) and replaces the whole command with it.
+        cleanedContent = cleanedContent.replace(/\\href\{[^}]+\}\{([^}]+)\}/g, '$1');
         
         // 3. Remove raw http/https text
         cleanedContent = cleanedContent.replace(/https?:\/\/[^\s}]+/g, '');
@@ -381,6 +388,9 @@ function postProcessLatex(latexCode: string): string {
         
         // 5. Clean up empty parentheses or brackets that might be left over: () or []
         cleanedContent = cleanedContent.replace(/\(\s*\)/g, '').replace(/\[\s*\]/g, '');
+        
+        // 6. Fix double dots or trailing dots left by removals
+        cleanedContent = cleanedContent.replace(/\.\s*\./g, '.');
 
         // Reassemble the code with the cleaned references section
         code = code.replace(fullMatch, `${sectionHeader}${cleanedContent}${endTag}`);
@@ -849,6 +859,7 @@ export async function fixLatexPaper(paperContent: string, compilationError: stri
     1.  **NO VISUALS:** DELETE all \\begin{figure} ... \\end{figure}, \\begin{table} ... \\end{table}, \\includegraphics{...}, \\begin{algorithm} ... \\end{algorithm}. Do NOT comment them out, DELETE them.
     2.  **MATH/UNDERSCORES:** The error "Missing $ inserted" is frequently caused by unescaped underscores in text mode (e.g. "variable_name"). You MUST escape them (variable\\_name) OR wrap the variable in math mode ($variable_name$) if it is a formula. Check context lines in the log.
     3.  **MATH SYMBOLS:** Ensure <, >, +, -, = are inside $...$ if used mathematically.
+    4.  **REFERENCES:** If the error involves \\bibitem or \\thebibliography, convert the bibliography to simple paragraphs using \\noindent. Remove \\url commands.
 
     **General Rules:**
     1.  **Precision:** Fix the specific error found in the log.
@@ -896,8 +907,10 @@ export async function reformatPaperWithStyleGuide(paperContent: string, styleGui
     **Rules:**
     1.  **Style:** ${styleGuideInfo.name}.
     2.  **Scope:** Edit ONLY content in \\section{References}. Keep preamble/body exact.
-    3.  **Format:** Plain list. NO \\bibitem. NO URLs.
-    4.  **Output:** Full LaTeX document.
+    3.  **Format:** Plain list paragraphs starting with \\noindent. 
+    4.  **STRICT PROHIBITION:** DO NOT use \\bibitem, \\begin{thebibliography}, or \\end{thebibliography}.
+    5.  **STRICT PROHIBITION:** DO NOT include URLs, DOIs, or hyperlinks. Text citations only.
+    6.  **Output:** Full LaTeX document.
     `;
 
     const userPrompt = `Reformat references to ${styleGuideInfo.name}.
