@@ -335,14 +335,15 @@ export async function fixLatexPaper(paperContent: string, compilationError: stri
 
 **Common Fix Strategies:**
 1. **"Missing $ inserted"**: Usually caused by unescaped underscores (e.g., "X_cf", "DOI: ..._...") in text mode. FIX: Escape them ("X\\_cf", "10.1007/...\\_...") or wrap DOIs/URLs in \\url{...} (e.g., \\url{https://doi.org/..._...}).
-2. **"Environment axis undefined"**: The code uses \\begin{axis} but misses \\usepackage{pgfplots}. FIX: Add \\usepackage{pgfplots} and \\pgfplotsset{compat=1.17} to the preamble.
-3. **"Environment ... undefined"**: Add the missing package (e.g., tikz, algorithm).
+2. **"Environment axis undefined"**: The code uses \\begin{axis} but misses \\usepackage{pgfplots}. FIX: Remove the axis environment or add the package if absolutely necessary.
+3. **"Environment ... undefined"**: Add the missing package or remove the environment.
 4. **"Unicode character"**: Remove or replace unsupported characters.
-5. **"File not found"**: If an image/bibliography file is missing, comment out the include command or replace with a placeholder.
+5. **"File not found"**: If an image is missing (e.g., \\includegraphics), replace it with a text placeholder "[IMAGE REMOVED]" or comment out the figure.
+6. **"Timeout" or "Status 1"**: This means the document is too heavy. FIX: **REMOVE** heavy packages like 'pgfplots', 'tikz', 'listings'. Remove complex diagrams. Simplify tables. Return a lighter, compilable version.
 
 **Rules:**
 - Fix ONLY the error reported in the log.
-- Do not remove content unless it's the source of the error and unfixable.
+- Do not remove content unless it's the source of the error/timeout.
 - Return the FULL, VALID LaTeX document.
 - DO NOT use \\bibitem or \\bibliography. Keep references as plain text lists.`;
     
