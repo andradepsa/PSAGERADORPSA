@@ -723,7 +723,10 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     5.  **No Placeholders:** Search and replace any remaining placeholders with concrete data.
     6.  **Safety:** Do not add \\newpage.
     7.  **NO VISUALS:** Strictly REMOVE all 'figure', 'table', 'includegraphics', 'tikzpicture' environments.
-    8.  **LATEX SYNTAX:** Escape underscores (_) in text-mode commands (e.g., convert \\text{my_var} to \\text{my\\_var}) to prevent 'Missing $ inserted' errors.
+    8.  **LATEX SYNTAX - CRITICAL:** You MUST escape underscores (_) when used in text mode (e.g., variable names).
+        - INCORRECT: \\text{model_size}
+        - CORRECT: \\text{model\\_size}
+        - Failure to escape causes "Missing $ inserted" errors.
     `;
 
     // Strip comments to reduce input token usage, AI will rewrite content anyway

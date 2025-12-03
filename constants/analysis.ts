@@ -30,5 +30,5 @@ export const ANALYSIS_TOPICS: AnalysisTopic[] = [
     { num: 27, name: 'DEPTH OF CRITICAL ANALYSIS', desc: 'Profundidade da análise crítica.' },
     { num: 28, name: 'PAGE COUNT', desc: 'Adesão ao tamanho solicitado.' },
     { num: 29, name: 'NO PLACEHOLDERS', desc: 'Garantir a substituição de todos os placeholders por conteúdo real.' },
-    { num: 30, name: 'NO VISUAL ELEMENTS & SYNTAX FIX', desc: 'REMOVER estritamente todas as Figuras/Tabelas. CORRIGIR CRITICAMENTE underscores (_) não escapados dentro de comandos de texto (ex: transformar \text{model_size} em \text{model\_size}) para evitar falhas fatais de compilação.' }
+    { num: 30, name: 'NO VISUAL ELEMENTS & SYNTAX FIX', desc: 'CRÍTICO: 1) REMOVER todas as Figuras/Tabelas. 2) CORRIGIR ERRO "! Missing $ inserted": Escapar underscores em comandos de texto (ex: usar \text{model\_size} em vez de \text{model_size}). Underscores não escapados em modo texto causam falha fatal.' }
 ];
