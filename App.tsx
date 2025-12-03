@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide } from './services/geminiService';
 import type { Language, IterationAnalysis, PaperSource, AnalysisResult, StyleGuide, ArticleEntry, PersonalData } from './types';
@@ -274,13 +273,6 @@ const App: React.FC = () => {
 
                 if (!response.ok) {
                     const errorData = await response.json();
-                    
-                    // CRITICAL FIX: If status is 400 (Bad Request), it's a LaTeX Syntax Error.
-                    // Do NOT retry with the same broken code. Fail fast to trigger AI Fix.
-                    if (response.status === 400) {
-                         throw new Error(`LATEX_SYNTAX_ERROR: ${errorData.error || 'Syntax error'}`);
-                    }
-
                     console.error(`Attempt ${attempt} FAILED. Server error:`, errorData);
                     throw new Error(errorData.error || `Falha na compilação (tentativa ${attempt}).`);
                 }
@@ -297,13 +289,6 @@ const App: React.FC = () => {
             } catch (error) {
                 lastError = error instanceof Error ? error : new Error(String(error));
                 console.warn(`Compilation attempt ${attempt} failed:`, lastError.message);
-
-                // Optimization: Break retry loop immediately if it's a syntax error
-                if (lastError.message.startsWith('LATEX_SYNTAX_ERROR')) {
-                    console.warn("Syntax error detected (Status 400). Skipping retries and proceeding to AI fix.");
-                    break;
-                }
-
                 if (attempt < MAX_COMPILE_ATTEMPTS) await new Promise(resolve => setTimeout(resolve, 1500));
             }
         }

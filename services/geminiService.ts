@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Language, AnalysisResult, PaperSource, StyleGuide, SemanticScholarPaper, PersonalData } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES, SEMANTIC_SCHOLAR_API_BASE_URL } from '../constants';
@@ -43,11 +42,17 @@ const KeyManager = {
 
         this.keys = newKeys;
 
+        // STRATEGY FOR MULTI-WINDOW SUPPORT:
+        // If this is the first time loading in this window session,
+        // pick a RANDOM starting index instead of 0. 
+        // This ensures that if 10 tabs are opened, they statistically distribute 
+        // themselves across the available keys rather than all hitting Key #1 simultaneously.
         if (!this.initialized && this.keys.length > 0) {
             this.currentIndex = Math.floor(Math.random() * this.keys.length);
             console.log(`[KeyManager] Window initialized. Randomly selected starting API Key Index: ${this.currentIndex + 1}/${this.keys.length}`);
             this.initialized = true;
         } else if (this.keys.length > 0) {
+            // Ensure index is within bounds if keys were removed externally via settings
             if (this.currentIndex >= this.keys.length) {
                 this.currentIndex = 0;
             }
@@ -55,6 +60,7 @@ const KeyManager = {
     },
 
     getCurrentKey: function(): string {
+        // We load keys to ensure we have the latest list, but we rely on the random index set during initialization
         this.loadKeys(); 
         if (this.keys.length === 0) {
             throw new Error("Gemini API key not found. Please add keys in the settings modal (gear icon).");
@@ -74,11 +80,13 @@ const KeyManager = {
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Wrapper to create client with the CURRENT active key
 function getAiClient(): GoogleGenAI {
     const apiKey = KeyManager.getCurrentKey();
     return new GoogleGenAI({ apiKey });
 }
 
+// Helper to identify errors that should trigger a key rotation (Quota, Rate Limit, Suspension)
 function isRotationTrigger(error: any): boolean {
     const errorMessage = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
     return (
@@ -89,16 +97,26 @@ function isRotationTrigger(error: any): boolean {
         errorMessage.includes('403') || 
         errorMessage.includes('permission denied') ||
         errorMessage.includes('suspended') ||
-        errorMessage.includes('consumer')
+        errorMessage.includes('consumer') // often appears in suspension messages
     );
 }
 
+// Executes an AI model call with automatic key rotation on Quota/429 errors
 async function executeWithKeyRotation<T>(
     operation: (client: GoogleGenAI) => Promise<T>, 
     modelName: string
 ): Promise<T> {
+    
+    // Ensure keys are loaded. 
+    // Note: loadKeys() will maintain the current randomized index for this window unless the list changed drastically.
     KeyManager.loadKeys(); 
+
+    // We allow trying each key once before giving up entirely on this specific request.
     const maxAttempts = KeyManager.keys.length > 0 ? KeyManager.keys.length : 1;
+    
+    // However, if we only have 1 key, we still want to retry transient errors a few times.
+    // The inner retry logic inside `withRateLimitHandling` handles transient 500s/429s.
+    // This outer loop handles "Hard Quota" or "Persistent 429" by switching keys.
     
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
         try {
@@ -106,25 +124,38 @@ async function executeWithKeyRotation<T>(
             return await withRateLimitHandling(() => operation(client));
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
+            
+            // Check if error is related to quota or exhaustion
             const shouldRotate = isRotationTrigger(error);
 
+            // If it's a quota/auth error and we have more keys, rotate and continue loop
             if (shouldRotate && KeyManager.keys.length > 1) {
                 console.warn(`⚠️ API Key (Index ${KeyManager.currentIndex}) exhausted or suspended. Attempting to rotate... Error: ${errorMessage}`);
                 KeyManager.rotate();
+                
+                // Add a SIGNIFICANT safety delay during rotation.
+                // Google tracks RPM (requests per minute) across keys from the same IP often.
+                // Hammering rotate too fast can suspend the next key immediately.
                 console.log("Waiting 10 seconds before trying next key to clear IP rate limits...");
                 await delay(10000); 
+                
                 continue; 
             }
 
+            // If it's not a quota error, or we ran out of keys, throw the error up
+            // Note: If we are on the last key and it fails with quota, the loop ends and we throw.
             if (attempt === maxAttempts - 1) {
+                // If this was the last key, we modify the error message to ensure App.tsx detects it as exhaustion
                 if (shouldRotate) {
                     throw new Error(`All Gemini API Keys exhausted (Quota/Suspended). Last error: ${errorMessage}`);
                 }
                 throw error;
             }
-            throw error;
+            
+            throw error; // Non-quota errors (like 400 Bad Request) shouldn't rotate keys usually.
         }
     }
+    
     throw new Error("All Gemini API Keys exhausted (Rotation loop ended without success).");
 }
 
@@ -133,10 +164,11 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
     
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-            return await apiCall(); 
+            return await apiCall(); // Success!
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
             
+            // Hard failure for model non-existence or strict 0 quota
             if (errorMessage.includes('limit: 0') || errorMessage.includes('quota exceeded for metric')) {
                  throw new Error(`API Quota Exceeded (Limit: 0) or Model Unavailable: ${errorMessage}`);
             }
@@ -144,10 +176,14 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
             const shouldRotate = isRotationTrigger(error);
             const hasBackupKeys = KeyManager.keys.length > 1;
 
+            // OPTIMIZATION: If we hit a quota/auth limit and have other keys available, 
+            // throw immediately so `executeWithKeyRotation` can switch to the next key.
+            // Do NOT waste time retrying on a dead key if we have backups.
             if (shouldRotate && hasBackupKeys) {
                 throw error;
             }
 
+            // If it's the last attempt, propagate error so rotation logic can catch it (if applicable) or fail
             if (attempt === MAX_RETRIES) {
                 if (shouldRotate) {
                     throw new Error(`Quota Exceeded or Key Suspended: ${errorMessage}`);
@@ -160,8 +196,12 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
 
             let backoffTime;
             if (shouldRotate) {
+                // If we are here, we have only 1 key (or no backups loaded) and hit 429/403. We must wait.
+                // Note: Waiting on 403 Suspended won't help, but logic dictates we try if no backups.
+                // UPDATED: Increased backoff time significantly to prevent suspension cascades.
                 backoffTime = 8000 + Math.random() * 4000;
             } else {
+                // Transient error (503, etc). Exponential backoff.
                 console.log("Transient error detected. Using exponential backoff...");
                 backoffTime = Math.pow(2, attempt) * 1000 + Math.random() * 500;
             }
@@ -173,6 +213,7 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
     throw new Error("API call failed after internal retries.");
 }
 
+// Central dispatcher for different AI models
 async function callModel(
     model: string,
     systemInstruction: string,
@@ -183,9 +224,10 @@ async function callModel(
         googleSearch?: boolean;
     } = {}
 ): Promise<GenerateContentResponse> {
-    console.log(`[Gemini Service] Calling model: ${model}`);
+    console.log(`[Gemini Service] Calling model: ${model}`); // LOG FOR VERIFICATION
 
     if (model.startsWith('gemini-')) {
+        // Wrap the generation logic in the rotation handler
         return executeWithKeyRotation(async (aiClient) => {
             return aiClient.models.generateContent({
                 model: model,
@@ -200,6 +242,7 @@ async function callModel(
         }, model);
 
     } else if (model.startsWith('grok-')) {
+        // Grok logic remains unchanged (single key support)
         const apiKey = localStorage.getItem('xai_api_key');
         if (!apiKey) {
             throw new Error("x.ai API key not found. Please set it in the settings modal (gear icon).");
@@ -258,7 +301,11 @@ async function callModel(
 
 export async function generatePaperTitle(topic: string, language: Language, model: string, discipline: string): Promise<string> {
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
+
+    // OPTIMIZATION: Compressed system instruction for token saving
     const systemInstruction = `Act as an expert academic researcher in ${discipline}. Generate a single, compelling, high-impact scientific paper title.`;
+    
+    // Updated user prompt to remove hardcoded "mathematical" bias
     const userPrompt = `Topic: "${topic}" in ${discipline}.
     Task: Generate a single, novel, specific, high-impact research title.
     Language: **${languageName}**.
@@ -270,49 +317,47 @@ export async function generatePaperTitle(topic: string, language: Language, mode
         throw new Error("AI returned no candidates for title. Prompt likely blocked by safety filters.");
     }
     
+    // Safety check for empty response
     if (!response.text) {
          throw new Error("AI returned an empty response text for the title generation.");
     }
     
-    return response.text.trim().replace(/"/g, ''); 
+    return response.text.trim().replace(/"/g, ''); // Clean up any accidental quotes
+}
+
+
+// Programmatic post-processing to fix common LaTeX issues
+function postProcessLatex(latexCode: string): string {
+    // Robustly replace ampersands used for authors in bibliographies
+    let code = latexCode.replace(/,?\s+&\s+/g, ' and ');
+    
+    // CRITICAL: Strip CJK (Chinese, Japanese, Korean) characters
+    // The default pdflatex compiler does not support these characters and will crash.
+    // We remove them to ensure the paper compiles.
+    // Ranges:
+    // \u4e00-\u9fff (Common CJK)
+    // \u3400-\u4dbf (Extension A)
+    // \uf900-\ufaff (Compatibility)
+    // \u3040-\u309f (Hiragana)
+    // \u30a0-\u30ff (Katakana)
+    // \uac00-\ud7af (Hangul)
+    code = code.replace(/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g, '');
+
+    return code;
 }
 
 /**
- * Strips comments from LaTeX code to save tokens and file size.
+ * Strips comments from LaTeX code to save tokens.
  * Matches '%' that are at the start of a line OR not preceded by a backslash.
  */
 function stripLatexComments(text: string): string {
     return text.replace(/(^|[^\\])%.*$/gm, '$1').trim();
 }
 
-// Programmatic post-processing to fix common LaTeX issues and aggressively clean payload
-function postProcessLatex(latexCode: string): string {
-    let code = latexCode;
-
-    // 1. Strip comments to significantly reduce size for compilation (fixes 400 Bad Request issues)
-    code = stripLatexComments(code);
-
-    // 2. Remove microtype (causes timeouts on some compilers)
-    code = code.replace(/\\usepackage(\[.*?\])?\{microtype\}/g, '');
-
-    // 3. Robustly replace ampersands used for authors/text
-    code = code.replace(/,?\s+&\s+/g, ' and ');
-    
-    // 4. CRITICAL: Strip CJK (Chinese, Japanese, Korean) characters
-    code = code.replace(/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g, '');
-
-    // 5. SURGICAL FIX FOR TOPIC 30 (No Visuals & LaTeX Fixes)
-    // Aggressively DELETE figure, table, algorithm environments and includegraphics
-    code = code.replace(/\\includegraphics(\[.*?\])?\{.*?\}/gi, '');
-    code = code.replace(/\\begin\{figure\*?\}([\s\S]*?)\\end\{figure\*?\}/gi, '');
-    code = code.replace(/\\begin\{table\*?\}([\s\S]*?)\\end\{table\*?\}/gi, '');
-    code = code.replace(/\\begin\{algorithm\*?\}([\s\S]*?)\\end\{algorithm\*?\}/gi, '');
-    code = code.replace(/\\begin\{listing\*?\}([\s\S]*?)\\end\{listing\*?\}/gi, '');
-    code = code.replace(/\\begin\{tikzpicture\}([\s\S]*?)\\end\{tikzpicture\}/gi, '');
-
-    return code.trim();
-}
-
+/**
+ * Extracts only the body content between \begin{document} and \end{document}
+ * to save tokens during analysis.
+ */
 function extractDocumentBody(latex: string): string {
     const beginTag = '\\begin{document}';
     const endTag = '\\end{document}';
@@ -320,11 +365,19 @@ function extractDocumentBody(latex: string): string {
     const endIndex = latex.lastIndexOf(endTag);
     
     if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+        // Return content inside document environment, trimmed
         return latex.substring(startIndex + beginTag.length, endIndex).trim();
     }
+    // Fallback: if tags are not found or malformed, return the full (stripped) latex
     return latex;
 }
 
+/**
+ * STRATEGIC OPTIMIZATION:
+ * Extracts only the Abstract, Introduction, and Conclusion.
+ * This reduces input tokens for analysis by ~60-70% while keeping the critical
+ * "promise" (Intro) and "delivery" (Conclusion) context.
+ */
 function extractStrategicContext(latex: string): { text: string, isTruncated: boolean } {
     let combined = "";
     
@@ -335,6 +388,7 @@ function extractStrategicContext(latex: string): { text: string, isTruncated: bo
     }
 
     // 2. Extract Introduction
+    // Matches content starting at \section{Introduction} until the next \section
     const introMatch = latex.match(/\\section\{(?:Introduction|Introdução)\}([\s\S]*?)(?=\\section\{)/i);
     if (introMatch) {
         combined += "\\section{Introduction}\n" + introMatch[1].trim() + "\n\n";
@@ -342,11 +396,14 @@ function extractStrategicContext(latex: string): { text: string, isTruncated: bo
     }
 
     // 3. Extract Conclusion
+    // Matches content starting at \section{Conclusion} until the next \section or end of doc
     const conclusionMatch = latex.match(/\\section\{(?:Conclusion|Conclusão|Considerações Finais)\}([\s\S]*?)(?=\\section\{|\\end\{document\})/i);
     if (conclusionMatch) {
         combined += "\\section{Conclusion}\n" + conclusionMatch[1].trim() + "\n\n";
     }
 
+    // Safety Fallback: If regex failed (e.g. customized section names) or result is too short,
+    // revert to full body extraction to ensure the AI has something to analyze.
     if (combined.length < 500) {
         return { text: extractDocumentBody(latex), isTruncated: false };
     }
@@ -354,9 +411,18 @@ function extractStrategicContext(latex: string): { text: string, isTruncated: bo
     return { text: combined, isTruncated: true };
 }
 
+/**
+ * Fetches papers from the Semantic Scholar API based on a query.
+ * PROXIED to avoid CORS issues in the browser.
+ * @param query The search query string (e.g., paper title).
+ * @param limit The maximum number of papers to fetch.
+ * @returns A promise that resolves to an array of SemanticScholarPaper objects.
+ */
 async function fetchSemanticScholarPapers(query: string, limit: number = 5): Promise<SemanticScholarPaper[]> {
     try {
-        const fields = 'paperId,title,authors,abstract,url'; 
+        const fields = 'paperId,title,authors,abstract,url'; // Requesting specific fields
+        
+        // Use the local proxy instead of direct call
         const response = await fetch(`/semantic-proxy?query=${encodeURIComponent(query)}&limit=${limit}&fields=${fields}`);
 
         if (!response.ok) {
@@ -365,6 +431,7 @@ async function fetchSemanticScholarPapers(query: string, limit: number = 5): Pro
         }
 
         const data = await response.json();
+        // Semantic Scholar API returns data.data for the list of papers
         return data.data || [];
     } catch (error) {
         console.error("Error fetching from Semantic Scholar:", error);
@@ -376,6 +443,8 @@ async function fetchSemanticScholarPapers(query: string, limit: number = 5): Pro
 export async function generateInitialPaper(title: string, language: Language, pageCount: number, model: string, authorDetails: PersonalData[]): Promise<{ paper: string, sources: PaperSource[] }> {
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
     const babelLanguage = BABEL_LANG_MAP[language];
+
+    // Reduced from 20 to 10 to save tokens as requested by user
     const referenceCount = 10;
 
     const referencePlaceholders = Array.from(
@@ -383,6 +452,7 @@ export async function generateInitialPaper(title: string, language: Language, pa
         (_, i) => `[INSERT REFERENCE ${i + 1} HERE]`
     ).join('\n\n');
 
+    // Fetch Semantic Scholar papers, matching the number of references needed
     const semanticScholarPapers = await fetchSemanticScholarPapers(title, referenceCount);
     const semanticScholarContext = semanticScholarPapers.length > 0
         ? "\n\n**Additional Academic Sources from Semantic Scholar (prioritize these):**\n" +
@@ -391,29 +461,29 @@ export async function generateInitialPaper(title: string, language: Language, pa
           ).join('\n---\n')
         : "";
 
+    // Generate LaTeX author block for multiple authors
     const latexAuthorsBlock = authorDetails.map((author, index) => {
         const name = author.name || 'Unknown Author';
         const affiliation = author.affiliation ? `\\\\ ${author.affiliation}` : '';
         const orcid = author.orcid ? `\\\\ \\small ORCID: \\url{https://orcid.org/${author.orcid}}` : '';
         return `${name}${affiliation}${orcid}`;
-    }).join(' \\and\n'); 
+    }).join(' \\and\n'); // Use \and for multiple authors in LaTeX
 
     const pdfAuthorNames = authorDetails.map(a => a.name).filter(Boolean).join(', ');
 
+    // OPTIMIZATION: Compressed System Instruction
     const systemInstruction = `Act as a world-class AI specialized in generating LaTeX scientific papers. Write a complete, rigorous paper based on the title, strictly following the provided LaTeX template.
 
 **Rules:**
 1.  **Use Template:** Fill all placeholders [INSERT...] with relevant content.
-2.  **References:** Generate ${referenceCount} unique, **strictly academic citations**. **AVOID** websites/blogs. Format as plain paragraphs (\\noindent ... \\par). NO \\bibitem. NO URLs.
+2.  **References:** Generate ${referenceCount} unique, **strictly academic citations** from peer-reviewed journals, scholarly books, and conference papers. **You MUST AVOID citing general websites, blogs, or news articles.** Format as plain paragraphs (\\noindent ... \\par). NO \\bibitem. NO URLs.
 3.  **Language:** Write in **${languageName}**.
 4.  **Format:** Return valid LaTeX. NO ampersands (&) in text (use 'and'). NO CJK characters. Escape special chars (%, _, $).
 5.  **Structure:** Do NOT change commands. PRESERVE \\author/\\date verbatim.
 6.  **Content:** Generate detailed content for each section to meet ~${pageCount} pages.
-7.  **TOPIC 30 ENFORCEMENT (MANDATORY):**
-    -   **NO VISUALS:** Do NOT generate any environments like \\begin{figure}, \\begin{table}, or \\includegraphics. Use TEXT ONLY descriptions.
-    -   **CRITICAL SYNTAX RULE:** You MUST escape underscores in text mode (e.g., "variable\\_name" NOT "variable_name"). Do not use raw underscores unless in a math block ($x_i$). This avoids "Missing $ inserted" errors.
 `;
 
+    // Dynamically insert the babel package and reference placeholders into the template for the prompt
     let templateWithBabelAndAuthor = ARTICLE_TEMPLATE.replace(
         '% Babel package will be added dynamically based on language',
         `\\usepackage[${babelLanguage}]{babel}`
@@ -425,12 +495,13 @@ export async function generateInitialPaper(title: string, language: Language, pa
         referencePlaceholders
     );
 
+    // Replace dynamic author information using new, client-side generated block
     templateWithBabelAndAuthor = templateWithBabelAndAuthor.replace(
-        '__ALL_AUTHORS_LATEX_BLOCK__', 
+        '__ALL_AUTHORS_LATEX_BLOCK__', // This placeholder now represents the entire \author block
         latexAuthorsBlock
     );
     templateWithBabelAndAuthor = templateWithBabelAndAuthor.replace(
-        'pdfauthor={__PDF_AUTHOR_NAMES_PLACEHOLDER__}', 
+        'pdfauthor={__PDF_AUTHOR_NAMES_PLACEHOLDER__}', // Placeholder for pdfauthor in hypersetup
         `pdfauthor={${pdfAuthorNames}}`
     );
 
@@ -444,6 +515,7 @@ ${templateWithBabelAndAuthor}
 
     const response = await callModel(model, systemInstruction, userPrompt, { googleSearch: true });
     
+    // Detailed error reporting for empty responses
     if (!response.candidates || response.candidates.length === 0) {
         throw new Error("AI returned no candidates. This usually means the model refused the prompt (safety/policy).");
     }
@@ -457,6 +529,7 @@ ${templateWithBabelAndAuthor}
 
     let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
     
+    // Ensure the paper ends with \end{document}
     if (!paper.includes('\\end{document}')) {
         paper += '\n\\end{document}';
     }
@@ -471,18 +544,24 @@ ${templateWithBabelAndAuthor}
     return { paper: postProcessLatex(paper), sources };
 }
 
+// Robust JSON cleaner to handle AI hallucinations
 function cleanJsonOutput(text: string): string {
     let cleaned = text.trim();
+    // Remove markdown code blocks
     cleaned = cleaned.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '');
+    
+    // Check for repetition loops like "\nobreak\nobreak"
     if (cleaned.includes("nobreak\nobreak") || cleaned.includes("nobreaknobreak")) {
         throw new Error("Model output contained a repetition loop (nobreak).");
     }
+    
     return cleaned.trim();
 }
 
 export async function analyzePaper(paperContent: string, pageCount: number, model: string): Promise<AnalysisResult> {
     const analysisTopicsList = ANALYSIS_TOPICS.map(t => `- Topic ${t.num} (${t.name}): ${t.desc}`).join('\n');
     
+    // OPTIMIZATION: Compressed System Instruction
     const systemInstruction = `Act as an expert academic reviewer. Perform a rigorous, objective analysis of the LaTeX paper.
 
     **Task:**
@@ -519,22 +598,42 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
         required: ["analysis"],
     };
 
+    // Calculate rough page estimate from the FULL content before stripping (approx 3000 chars per page in LaTeX)
     const estimatedPagesFromChars = Math.max(1, Math.round(paperContent.length / 3000));
+
+    // Strip comments to reduce token usage
     let cleanPaper = stripLatexComments(paperContent);
+    
+    // OPTIMIZATION: Strip References section for ANALYSIS ONLY.
+    // The references consume a lot of tokens but aren't strictly necessary for the AI to judge structure/flow/argumentation.
+    // This saves ~10-15% input tokens.
+    // Regex matches \section{References} or \section{Referências} and everything following it until the end of the string.
     cleanPaper = cleanPaper.replace(/\\section\{(?:References|Referências)\}[\s\S]*$/, '');
+
+    // CRITICAL FIX: Detect ungenerated placeholders in the FULL content BEFORE stripping context.
+    // If the strategic extraction removes the middle sections (where the placeholders usually are),
+    // the AI won't see them and will give a high score, ending the loop prematurely.
     const hasUnfilledPlaceholders = cleanPaper.includes('[INSERT NEW CONTENT');
+
+    // OPTIMIZATION: Context Stripping / Strategic Extraction
+    // We only send the Abstract, Introduction and Conclusion for analysis to save massive tokens.
+    // The middleware is assumed good if the "bookends" (Intro/Conclusion) are solid.
     const contextObj = extractStrategicContext(cleanPaper);
     const paperToAnalyze = contextObj.text;
 
+    // Modify prompt to inform AI about the truncation if it happened
     const truncationNote = contextObj.isTruncated 
         ? `\n\n**NOTE:** Text is a **STRATEGIC EXTRACT** (Abstract+Intro+Conclusion) of a ${estimatedPagesFromChars}-page doc. References are omitted. Assume missing sections exist for structure/page-count scores.`
         : "";
 
     const finalSystemInstruction = systemInstruction + truncationNote;
+
+    // Retry logic for JSON parsing failures
     const MAX_PARSE_RETRIES = 3;
     
     for (let attempt = 1; attempt <= MAX_PARSE_RETRIES; attempt++) {
         try {
+            // Use strategic paper context instead of full body
             const response = await callModel(model, finalSystemInstruction, paperToAnalyze, {
                 jsonOutput: true,
                 responseSchema: responseSchema
@@ -551,6 +650,9 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
             const jsonText = cleanJsonOutput(response.text);
             const result = JSON.parse(jsonText) as AnalysisResult;
 
+            // POST-ANALYSIS OVERRIDE
+            // If we detected placeholders in the full text, we MUST force the "Improvement" step.
+            // We overwrite the score for Topic 13 (Structure) to ensure the Editor AI fixes it.
             if (hasUnfilledPlaceholders) {
                 console.warn("⚠️ Placeholder detected in content. Forcing score downgrade.");
                 const structureTopicIndex = result.analysis.findIndex(a => a.topicNum === 13);
@@ -566,15 +668,22 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
                     result.analysis.push(placeholderCritique);
                 }
             }
+
             return result;
+
         } catch (error) {
             console.warn(`Attempt ${attempt} to analyze paper failed (JSON Parse/Validation):`, error);
+            
+            // If it's the last attempt, fail loudly so the automation can handle it (or skip to next)
             if (attempt === MAX_PARSE_RETRIES) {
                 throw new Error(`The analysis returned an invalid format after ${MAX_PARSE_RETRIES} attempts. Last error: ${error instanceof Error ? error.message : String(error)}`);
             }
+            
+            // Short delay before retry to let potential hiccups settle
             await delay(2000);
         }
     }
+    
     throw new Error("Unexpected error in analysis loop.");
 }
 
@@ -584,12 +693,14 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     const improvementPoints = analysis.analysis
         .filter(item => item.score < 8.5)
         .map(item => {
+            // FIX: Corrected property access from 'item.num' to 'item.topicNum'
             const topic = ANALYSIS_TOPICS.find(t => t.num === item.topicNum);
             const topicName = topic ? topic.name : `UNKNOWN TOPIC (${item.topicNum})`;
             return `- **${topicName}**: ${item.improvement}`;
         })
         .join('\n');
 
+    // OPTIMIZATION: Compressed System Instruction
     const systemInstruction = `Act as an expert LaTeX editor. Refine the provided paper body based on suggestions.
 
     **Rules:**
@@ -597,15 +708,17 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     2.  **Output:** Return valid LaTeX body (from \\begin{document} to \\end{document}). NO Preamble.
     3.  **Language:** **${languageName}**.
     4.  **Formatting:** NO \\bibitem. NO URLs. Use 'and' instead of '&'. NO CJK chars.
-    5.  **TOPIC 30 ENFORCEMENT (STRICT):**
-        -   **NO VISUALS:** Do NOT generate \\begin{figure}, \\includegraphics, or \\begin{table}.
-        -   **MATH / MISSING $:** Ensure all math symbols (<, >, =, +, -) are inside $...$.
-        -   **UNDERSCORES:** You MUST escape underscores (_) in text mode (use \\_) unless they are math variables inside $...$. This is critical to prevent "Missing $ inserted" errors.
-    6.  **No Placeholders:** Search and replace any remaining placeholders with concrete data.
-    7.  **Safety:** Do not add \\newpage.
+    5.  **Placeholders:** Fill any remaining placeholders like [INSERT NEW CONTENT...].
+    6.  **Safety:** Do not add \\newpage. Do not add images.
     `;
 
+    // Strip comments to reduce input token usage, AI will rewrite content anyway
     const cleanPaper = stripLatexComments(paperContent);
+    
+    // OPTIMIZATION: PREAMBLE SURGERY
+    // We split the Preamble (static) from the Body (dynamic).
+    // We send ONLY the body to the AI to be rewritten, saving massive Output tokens.
+    // We send the Preamble only as context.
     const docStartIndex = cleanPaper.indexOf('\\begin{document}');
     let preamble = "";
     let bodyToImprove = cleanPaper;
@@ -614,6 +727,7 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
         preamble = cleanPaper.substring(0, docStartIndex);
         bodyToImprove = cleanPaper.substring(docStartIndex);
     } else {
+        // Fallback if document structure is weird: Send full text
         console.warn("Could not find \\begin{document} for splitting. Sending full text.");
     }
 
@@ -628,6 +742,7 @@ ${improvementPoints}
 
 Task: Return the COMPLETE, IMPROVED body starting with \\begin{document}.`;
 
+    // FORCED OPTIMIZATION: Use flash model to save quota/tokens during improvement loop
     const response = await callModel('gemini-2.5-flash', systemInstruction, userPrompt);
     
     if (!response.candidates || response.candidates.length === 0) {
@@ -640,10 +755,16 @@ Task: Return the COMPLETE, IMPROVED body starting with \\begin{document}.`;
 
     let improvedBody = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
 
+    // STITCHING: If we successfully split, we must re-attach the preamble.
+    // We check if the AI followed instructions and returned only the body (starts with \begin{document} or similar)
+    // or if it returned a full document (contains \documentclass).
     if (docStartIndex !== -1 && !improvedBody.includes('\\documentclass')) {
+        // AI behaved: It returned the body. Stitch it.
         return postProcessLatex(preamble + "\n" + improvedBody);
     } 
     
+    // AI misbehaved or we didn't split: It returned a full doc. Return as is.
+    // Ensure the paper ends with \end{document}
     if (!improvedBody.includes('\\end{document}')) {
         improvedBody += '\n\\end{document}';
     }
@@ -652,17 +773,17 @@ Task: Return the COMPLETE, IMPROVED body starting with \\begin{document}.`;
 }
 
 export async function fixLatexPaper(paperContent: string, compilationError: string, model: string): Promise<string> {
+    // OPTIMIZATION: Compressed System Instruction
     const systemInstruction = `Act as an expert LaTeX debugger. Fix compilation errors.
 
-    **CRITICAL PRIORITY: TOPIC 30 ENFORCEMENT**
-    1.  **NO VISUALS:** DELETE all \\begin{figure} ... \\end{figure}, \\begin{table} ... \\end{table}, \\includegraphics{...}, \\begin{algorithm} ... \\end{algorithm}. Do NOT comment them out, DELETE them.
-    2.  **MATH/UNDERSCORES:** The error "Missing $ inserted" is frequently caused by unescaped underscores in text mode (e.g. "variable_name"). You MUST escape them (variable\\_name) OR wrap the variable in math mode ($variable_name$) if it is a formula. Check context lines in the log.
-    3.  **SYNTAX ERROR / 400 BAD REQUEST:** If the error log mentions "Bad Request" or syntax issues without a specific line, assume the document is too large or has invalid characters. Remove unnecessary comments and ensure all environments are closed.
-
-    **General Rules:**
-    1.  **Precision:** Fix the specific error found in the log.
-    2.  **Output:** Return the FULL, CORRECTED, VALID LaTeX document.
-    3.  **Formatting:** No \\bibitem (use plain text), No \\cite (use plain text), No URLs. No CJK chars.
+    **Rules:**
+    1.  **Precision:** Fix ONLY the error. Do not refactor.
+    2.  **Output:** Full valid LaTeX document.
+    3.  **Specific Fixes:**
+        -   Error "&": Replace with 'and'.
+        -   Error "Unicode": Remove CJK chars (Chinese/Japanese).
+        -   Error "Preamble": Simplify metadata if broken. Preserve \\author block.
+    4.  **Prohibited:** NO \\bibitem, NO \\cite, NO URLs.
     `;
 
     const userPrompt = `Error:
@@ -678,12 +799,14 @@ ${paperContent}
 
     const response = await callModel(model, systemInstruction, userPrompt);
     
+    // Safety check
     if (!response.text) {
         throw new Error("AI returned an empty response for the fix step.");
     }
     
     let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
     
+    // Ensure the paper ends with \end{document}
     if (!paper.includes('\\end{document}')) {
         paper += '\n\\end{document}';
     }
@@ -697,6 +820,7 @@ export async function reformatPaperWithStyleGuide(paperContent: string, styleGui
         throw new Error(`Unknown style guide: ${styleGuide}`);
     }
 
+    // OPTIMIZATION: Compressed System Instruction
     const systemInstruction = `Act as academic editor. Reformat ONLY the References section.
 
     **Rules:**
@@ -716,12 +840,14 @@ export async function reformatPaperWithStyleGuide(paperContent: string, styleGui
 
     const response = await callModel(model, systemInstruction, userPrompt);
     
+    // Safety check
     if (!response.text) {
         throw new Error("AI returned an empty response for the reformat step.");
     }
 
     let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
 
+    // Ensure the paper ends with \end{document}
     if (!paper.includes('\\end{document}')) {
         paper += '\n\\end{document}';
     }
