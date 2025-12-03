@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide } from './services/geminiService';
 import type { Language, IterationAnalysis, PaperSource, AnalysisResult, StyleGuide, ArticleEntry, PersonalData } from './types';
-import { LANGUAGES, AVAILABLE_MODELS, ANALYSIS_TOPICS, ALL_TOPICS_BY_DISCIPLINE, getAllDisciplines, getRandomTopic, FIX_OPTIONS, STYLE_GUIDES, TOTAL_ITERATIONS, DISCIPLINE_AUTHORS } from './constants';
+import { LANGUAGES, ANALYSIS_TOPICS, ALL_TOPICS_BY_DISCIPLINE, getAllDisciplines, getRandomTopic, FIX_OPTIONS, STYLE_GUIDES, TOTAL_ITERATIONS, DISCIPLINE_AUTHORS } from './constants';
 
 
 import LanguageSelector from './components/LanguageSelector';
-import ModelSelector from './components/ModelSelector';
 import PageSelector from './components/PageSelector';
 import ActionButton from './components/ActionButton';
 import ProgressBar from './components/ProgressBar';
@@ -43,8 +42,7 @@ const App: React.FC = () => {
 
     // == STEP 1: GENERATION STATE ==
     const [language, setLanguage] = useState<Language>('en');
-    const [generationModel, setGenerationModel] = useState('gemini-2.5-flash');
-    const [analysisModel, setAnalysisModel] = useState('gemini-2.5-flash');
+    // REMOVED: Model selectors are now automated in geminiService.
     // REMOVIDAS AS OPÇÕES DE 30, 60, 100 PAGINAS. PADRÃO FIXO EM 12.
     const [pageCount, setPageCount] = useState(12);
     const [isGenerating, setIsGenerating] = useState(false);
@@ -294,13 +292,14 @@ const App: React.FC = () => {
         }
         
         if (lastError) {
-            onStatusUpdate(`⚠️ Compilação falhou. Tentando corrigir o código com IA (Modelo: ${analysisModel})...`);
+            onStatusUpdate(`⚠️ Compilação falhou. Tentando corrigir o código com IA...`);
             console.log("Initiating AI Fix...");
             console.log("Error Reason (Full Log sent to AI):", lastError.message);
             
             let fixedCode = '';
             try {
-                fixedCode = await fixLatexPaper(codeToCompile, lastError.message, analysisModel);
+                // Pass the status updater to the fix function
+                fixedCode = await fixLatexPaper(codeToCompile, lastError.message, (msg) => onStatusUpdate(`🤖 ${msg}`));
                 console.log("AI Fix Generated. New Code Length:", fixedCode.length);
                 console.log("👇👇👇 FIXED LATEX CODE BELOW 👇👇👇");
                 console.log(fixedCode);
@@ -370,6 +369,14 @@ const App: React.FC = () => {
             const articleEntryId = crypto.randomUUID();
             let temporaryTitle = `Artigo ${i} (Geração do Título Falhou)`;
             let currentPaper = '';
+            
+            // Define the status updater callback for this article
+            const updateStatus = (message: string) => {
+                const prefix = `Artigo ${i}/${articlesToProcess}: `;
+                // Prevent duplicate prefixes if the service adds its own
+                setGenerationStatus(message.startsWith(prefix) ? message : `${prefix}${message}`);
+            };
+
 
             try {
                 setIsGenerationComplete(false);
@@ -379,22 +386,21 @@ const App: React.FC = () => {
                 setGeneratedTitle('');
                 setFinalLatexCode('');
 
-                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando um título inovador para ${selectedDiscipline} (Modelo: ${analysisModel})...`);
+                updateStatus(`Gerando um título inovador para ${selectedDiscipline}...`);
                 setGenerationProgress(5);
-                // Use getRandomTopic with selectedDiscipline
+                
                 const randomTopic = getRandomTopic(selectedDiscipline);
-                // Pass selectedDiscipline to the title generator
-                temporaryTitle = await generatePaperTitle(randomTopic, language, analysisModel, selectedDiscipline);
+                temporaryTitle = await generatePaperTitle(randomTopic, language, selectedDiscipline, updateStatus);
                 setGeneratedTitle(temporaryTitle);
 
-                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando a primeira versão (Modelo: ${generationModel})...`);
+                updateStatus(`Gerando a primeira versão...`);
                 setGenerationProgress(15);
                 const { paper: initialPaper, sources } = await generateInitialPaper(
                     temporaryTitle, 
                     language, 
                     pageCount, 
-                    generationModel, 
-                    authors // Pass dynamic authors array
+                    authors, // Pass dynamic authors array
+                    updateStatus
                 );
                 currentPaper = initialPaper;
                 setPaperSources(sources);
@@ -402,14 +408,14 @@ const App: React.FC = () => {
                 for (let iter = 1; iter <= TOTAL_ITERATIONS; iter++) {
                     if (isGenerationCancelled.current) throw new Error("Operação cancelada pelo usuário.");
                     setGenerationProgress(15 + (iter / TOTAL_ITERATIONS) * 75);
-                    setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Analisando (iteração ${iter}/${TOTAL_ITERATIONS}) (Modelo: ${analysisModel})...`);
-                    const analysisResult = await analyzePaper(currentPaper, pageCount, analysisModel);
+                    updateStatus(`Analisando (iteração ${iter}/${TOTAL_ITERATIONS})...`);
+                    const analysisResult = await analyzePaper(currentPaper, pageCount, updateStatus);
                     const validAnalysisItems = analysisResult.analysis.filter(res => ANALYSIS_TOPICS.some(topic => topic.num === res.topicNum));
                     setAnalysisResults(prev => [...prev, { iteration: iter, results: validAnalysisItems.map(res => ({ topic: ANALYSIS_TOPICS.find(t => t.num === res.topicNum)!, score: res.score, scoreClass: getScoreClass(res.score), improvement: res.improvement })) }]);
                     if (!validAnalysisItems.some(res => res.score < 7.0)) break;
                     if (iter < TOTAL_ITERATIONS) {
-                        setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Refinando com base no feedback ${iter}... (Modelo: ${generationModel})`);
-                        currentPaper = await improvePaper(currentPaper, { analysis: validAnalysisItems }, language, generationModel);
+                        updateStatus(`Refinando com base no feedback ${iter}...`);
+                        currentPaper = await improvePaper(currentPaper, { analysis: validAnalysisItems }, language, updateStatus);
                     }
                 }
 
@@ -418,14 +424,13 @@ const App: React.FC = () => {
                 setFinalLatexCode(currentPaper);
                 setGenerationProgress(95);
                 let compiledFile: File | null = null;
-                const compilationUpdater = (message: string) => setGenerationStatus(`Artigo ${i}/${articlesToProcess}: ${message}`);
-                const { pdfFile, finalCode } = await robustCompile(currentPaper, compilationUpdater);
+                const { pdfFile, finalCode } = await robustCompile(currentPaper, updateStatus);
                 compiledFile = pdfFile;
                 currentPaper = finalCode;
 
                 if (isGenerationCancelled.current) continue;
 
-                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Publicando no Zenodo...`);
+                updateStatus(`Publicando no Zenodo...`);
                 setGenerationProgress(98);
                 const metadataForUpload = extractMetadata(currentPaper, true);
                 const keywordsForUpload = currentPaper.match(/\\keywords\{([^}]+)\}/)?.[1] || '';
@@ -479,7 +484,7 @@ const App: React.FC = () => {
                         const errorMessage = error instanceof Error ? error.message : `Tentativa ${attempt} falhou.`;
                         if (attempt === 10) throw new Error(`Falha ao enviar para o Zenodo após 10 tentativas. Erro final: ${errorMessage}`);
                         const delayTime = 15000 + (5000 * (attempt - 1));
-                        setGenerationStatus(`Artigo ${i}/${articlesToProcess}: ❌ ${errorMessage} Aguardando ${delayTime / 1000}s...`);
+                        updateStatus(`❌ ${errorMessage} Aguardando ${delayTime / 1000}s...`);
                         await new Promise(resolve => setTimeout(resolve, delayTime));
                     }
                 }
@@ -499,7 +504,8 @@ const App: React.FC = () => {
                 if (
                     lowerMsg.includes('quota') || 
                     lowerMsg.includes('exhausted') || 
-                    lowerMsg.includes('rotation loop')
+                    lowerMsg.includes('rotation loop') ||
+                    lowerMsg.includes('todas as chaves') // Custom message from our service
                 ) {
                     setGenerationStatus(`🛑 Limite de cota atingido em TODAS as chaves de API. A automação será pausada.`);
                     setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: 'upload_failed', latexCode: currentPaper, errorMessage: `Pausado por limite de cota global: ${errorMessage}` }]);
@@ -876,7 +882,7 @@ const App: React.FC = () => {
         setIsReformatting(true);
         setCompilationStatus(<div className="status-message status-info">🤖 Aplicando guia de estilo à bibliografia...</div>);
         try {
-            const reformattedCode = await reformatPaperWithStyleGuide(latexCode, selectedStyle, generationModel);
+            const reformattedCode = await reformatPaperWithStyleGuide(latexCode, selectedStyle, (msg) => setCompilationStatus(<div className="status-message status-info">{msg}</div>));
             setLatexCode(reformattedCode);
             setCompilationStatus(
                 <div className="status-message status-success">✅ Guia de estilo aplicado com sucesso! O código foi atualizado.</div>
@@ -972,11 +978,7 @@ const App: React.FC = () => {
                 onSave={(keys) => { 
                     // Save Gemini Keys (Array)
                     localStorage.setItem('gemini_api_keys', JSON.stringify(keys.gemini));
-                    // Save the first key as default for backward compatibility or simple usage
-                    if (keys.gemini.length > 0) {
-                        localStorage.setItem('gemini_api_key', keys.gemini[0]);
-                    }
-
+                    
                     if (keys.zenodo) setZenodoToken(keys.zenodo); 
                     if (keys.xai) localStorage.setItem('xai_api_key', keys.xai); 
                     setIsApiModalOpen(false); 
@@ -1001,7 +1003,7 @@ const App: React.FC = () => {
                             </svg>
                         </button>
                         <button onClick={() => setIsApiModalOpen(true)} className="p-2 rounded-full hover:bg-gray-200 transition-colors" title="Configurações de API Key">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066 2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                         </button>
                     </div>
                 </div>
@@ -1019,8 +1021,10 @@ const App: React.FC = () => {
                             <h3 className="text-lg font-semibold mb-3">Configurações</h3>
                             <div className="space-y-4">
                                 <LanguageSelector languages={LANGUAGES} selectedLanguage={language} onSelect={setLanguage} />
-                                <ModelSelector models={AVAILABLE_MODELS} selectedModel={analysisModel} onSelect={setAnalysisModel} label="Modelo Rápido (para análise e título):" />
-                                <ModelSelector models={AVAILABLE_MODELS} selectedModel={generationModel} onSelect={setGenerationModel} label="Modelo Poderoso (para geração e melhoria):" />
+                                {/* Model selectors removed for automated rotation */}
+                                <p className="text-sm text-center text-gray-600 bg-gray-100 p-3 rounded-lg">
+                                    🤖 **Seleção de Modelos Automatizada:** O sistema usará `gemini-2.5-flash` como primário e `gemini-2.0-flash` como fallback para otimizar o uso de cotas.
+                                </p>
                                 <PageSelector options={[12]} selectedPageCount={pageCount} onSelect={setPageCount} />
                                 <div>
                                     <label htmlFor="discipline-select" className="font-semibold block mb-2">Disciplina para Geração de Título:</label>

@@ -7,29 +7,26 @@ interface ApiKeyModalProps {
 }
 
 const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave }) => {
-    const [geminiKey, setGeminiKey] = useState('');
+    const [geminiKeys, setGeminiKeys] = useState<string[]>(['']);
     const [zenodoKey, setZenodoKey] = useState('');
     const [xaiKey, setXaiKey] = useState('');
 
     useEffect(() => {
         if (isOpen) {
-            // Priority: Check single key first, then array (taking the first one)
-            const storedSingleKey = localStorage.getItem('gemini_api_key');
             const storedMultiKeys = localStorage.getItem('gemini_api_keys');
-
-            if (storedSingleKey) {
-                setGeminiKey(storedSingleKey);
-            } else if (storedMultiKeys) {
+            if (storedMultiKeys) {
                 try {
                     const parsed = JSON.parse(storedMultiKeys);
                     if (Array.isArray(parsed) && parsed.length > 0) {
-                        setGeminiKey(parsed[0]);
+                        setGeminiKeys(parsed);
+                    } else {
+                        setGeminiKeys(['']);
                     }
                 } catch {
-                    setGeminiKey('');
+                    setGeminiKeys(['']);
                 }
             } else {
-                setGeminiKey('');
+                 setGeminiKeys(['']);
             }
 
             setZenodoKey(localStorage.getItem('zenodo_api_key') || '');
@@ -40,14 +37,30 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave }) =>
     if (!isOpen) return null;
 
     const handleSave = () => {
-        // Wrap the single key in an array for compatibility with App.tsx
-        const keyToSave = geminiKey.trim();
         onSave({ 
-            gemini: keyToSave ? [keyToSave] : [], 
+            gemini: geminiKeys.map(k => k.trim()).filter(k => k), 
             zenodo: zenodoKey, 
             xai: xaiKey 
         });
     };
+    
+    const handleGeminiKeyChange = (index: number, value: string) => {
+        const newKeys = [...geminiKeys];
+        newKeys[index] = value;
+        setGeminiKeys(newKeys);
+    };
+
+    const handleAddKey = () => {
+        setGeminiKeys([...geminiKeys, '']);
+    };
+    
+    const handleRemoveKey = (index: number) => {
+        if (geminiKeys.length > 1) {
+            const newKeys = geminiKeys.filter((_, i) => i !== index);
+            setGeminiKeys(newKeys);
+        }
+    };
+
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4" aria-modal="true" role="dialog">
@@ -60,22 +73,36 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave }) =>
                 </div>
                 
                 <p className="text-gray-600 mb-6">
-                    Configure suas chaves de API.
+                   Configure suas chaves de API. Adicione múltiplas chaves Gemini para rotação automática em caso de esgotamento de cota.
                 </p>
                 
                 <div className="space-y-6">
                     <div>
-                        <label htmlFor="gemini-key" className="block text-sm font-medium text-gray-700 mb-1">
-                            🔑 Gemini API Key
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                            🔑 Gemini API Key(s)
                         </label>
-                        <input
-                            id="gemini-key"
-                            type="password"
-                            value={geminiKey}
-                            onChange={(e) => setGeminiKey(e.target.value)}
-                            placeholder="Cole sua Gemini API Key aqui"
-                            className="block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
-                        />
+                        <div className="space-y-2">
+                             {geminiKeys.map((key, index) => (
+                                <div key={index} className="flex items-center gap-2">
+                                    <input
+                                        type="password"
+                                        value={key}
+                                        onChange={(e) => handleGeminiKeyChange(index, e.target.value)}
+                                        placeholder={`Cole a Gemini API Key #${index + 1} aqui`}
+                                        className="block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                                    />
+                                    <button 
+                                        onClick={() => handleRemoveKey(index)}
+                                        disabled={geminiKeys.length <= 1}
+                                        className="p-2 text-red-500 rounded-full hover:bg-red-100 disabled:text-gray-400 disabled:hover:bg-transparent"
+                                        aria-label="Remove API Key"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 000 2h6a1 1 0 100-2H7z" clipRule="evenodd" /></svg>
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                        <button onClick={handleAddKey} className="mt-2 text-sm text-indigo-600 hover:text-indigo-800 font-semibold">+ Adicionar outra chave</button>
                     </div>
 
                     <div className="border-t pt-4">
