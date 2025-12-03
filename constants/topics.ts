@@ -28,8 +28,7 @@ export const ANALYSIS_TOPICS: AnalysisTopic[] = [
     { num: 25, name: 'THEORETICAL FOUNDATION', desc: 'Base teórica sólida.' },
     { num: 26, name: 'SCIENTIFIC CONTENT ACCURACY', desc: 'Precisão das informações científicas.' },
     { num: 27, name: 'DEPTH OF CRITICAL ANALYSIS', desc: 'Profundidade da análise crítica.' },
-    { num: 28, name: 'PAGE COUNT', desc: 'Adesão ao tamanho solicitado.' },
-    { num: 29, name: 'NO PLACEHOLDERS', desc: 'Verifica se ainda existem placeholders não preenchidos.' }
+    { num: 28, name: 'PAGE COUNT', desc: 'Adesão ao tamanho solicitado.' }
 ];
 
 export const DISCIPLINE_AUTHORS: Record<string, string> = {
