@@ -1,8 +1,6 @@
 import type { LanguageOption, AnalysisTopic, StyleGuideOption } from './types';
 
-// Otimização de Cota: Reduzido para 1.
-// Artigos longos consomem muitos tokens. 1 iteração é o equilíbrio ideal para contas gratuitas.
-export const TOTAL_ITERATIONS = 1;
+export const TOTAL_ITERATIONS = 12;
 
 export const LANGUAGES: LanguageOption[] = [
     { code: 'en', name: 'English', flag: '🇬🇧' },
@@ -41,7 +39,18 @@ export const ANALYSIS_TOPICS: AnalysisTopic[] = [
     { num: 12, name: 'COHERENCE AND FLOW', desc: 'Transições suaves entre seções.' },
     { num: 13, name: 'STRUCTURE', desc: 'Organização geral do LaTeX.' },
     { num: 14, name: 'REFERENCES', desc: 'Formatação e relevância.' },
+    { num: 15, name: 'SCOPE AND BOUNDARIES', desc: 'Definição clara do escopo.' },
+    { num: 16, name: 'SCIENTIFIC HONESTY', desc: 'Transparência e evitar plágio.' },
     { num: 17, name: 'TITLE-CONTENT ALIGNMENT', desc: 'Alinhamento entre título e conteúdo.' },
+    { num: 18, name: 'STATEMENT OF LIMITATIONS', desc: 'Reconhecimento de limitações.' },
+    { num: 20, name: 'PRACTICAL IMPLICATIONS', desc: 'Relevância prática.' },
+    { num: 21, name: 'TERMINOLOGY', desc: 'Uso correto de termos técnicos.' },
+    { num: 22, name: 'ETHICAL CONSIDERATIONS', desc: 'Considerações éticas.' },
+    { num: 23, name: 'LATEX ACCURACY', desc: 'Compilabilidade técnica.' },
+    { num: 24, name: 'STRATEGIC REFINEMENT', desc: 'Melhorias cirúrgicas sem quebrar o texto.' },
+    { num: 25, name: 'THEORETICAL FOUNDATION', desc: 'Base teórica sólida.' },
+    { num: 26, name: 'SCIENTIFIC CONTENT ACCURACY', desc: 'Precisão das informações científicas.' },
+    { num: 27, name: 'DEPTH OF CRITICAL ANALYSIS', desc: 'Profundidade da análise crítica.' },
     { num: 28, name: 'PAGE COUNT', desc: 'Adesão ao tamanho solicitado.' }
 ];
 

@@ -45,7 +45,6 @@ const App: React.FC = () => {
     const [language, setLanguage] = useState<Language>('en');
     const [generationModel, setGenerationModel] = useState('gemini-2.5-flash');
     const [analysisModel, setAnalysisModel] = useState('gemini-2.5-flash');
-    // REMOVIDAS AS OPÇÕES DE 30, 60, 100 PAGINAS. PADRÃO FIXO EM 12.
     const [pageCount, setPageCount] = useState(12);
     const [isGenerating, setIsGenerating] = useState(false);
     const [generationProgress, setGenerationProgress] = useState(0);
@@ -56,7 +55,7 @@ const App: React.FC = () => {
     const [finalLatexCode, setFinalLatexCode] = useState('');
     const [isGenerationComplete, setIsGenerationComplete] = useState(false);
     const isGenerationCancelled = useRef(false);
-    const [numberOfArticles, setNumberOfArticles] = useState(1);
+    // Removed numberOfArticles state
     // Replaced publishedArticles with articleEntries
     const [articleEntries, setArticleEntries] = useState<ArticleEntry[]>(() => {
         try {
@@ -222,9 +221,7 @@ const App: React.FC = () => {
 
             schedulerTimeoutRef.current = window.setTimeout(() => {
                 console.log("Scheduler triggered! Starting automatic run...");
-                // Start with 1 article, continuous mode will handle the loop if enabled,
-                // otherwise it's just 1 scheduled article.
-                if (!isGenerating) handleFullAutomation(1); 
+                if (!isGenerating) handleFullAutomation(1); // Trigger just 1 article
                 scheduleNextRun();
             }, delay);
         };
@@ -294,7 +291,7 @@ const App: React.FC = () => {
         }
         
         if (lastError) {
-            onStatusUpdate(`⚠️ Compilação falhou. Tentando corrigir o código com IA (Modelo: ${analysisModel})...`);
+            onStatusUpdate(`⚠️ Compilação falhou. Tentando corrigir o código com IA...`);
             console.log("Initiating AI Fix...");
             console.log("Error Reason (Full Log sent to AI):", lastError.message);
             
@@ -341,9 +338,9 @@ const App: React.FC = () => {
     };
 
     const handleFullAutomation = async (batchSizeOverride?: number) => {
-        // Important: In Continuous Mode, we default to a batch size of 1 to allow for cooldowns between papers.
-        // This ensures "GERAR APENAS UM ARTIGO POR VEZ" as requested.
-        const articlesToProcess = batchSizeOverride ?? (isContinuousMode ? 1 : numberOfArticles);
+        // ALWAYS process 1 article per loop cycle. The "continuous" aspect is handled by the loop/timeout below.
+        const articlesToProcess = 1;
+        
         const storedToken = localStorage.getItem('zenodo_api_key');
         if (!storedToken) {
             alert('❌ Token Zenodo não encontrado! Por favor, configure-o nas definições (ícone de engrenagem) antes de iniciar.');
@@ -368,7 +365,7 @@ const App: React.FC = () => {
             if (isGenerationCancelled.current) break;
             
             const articleEntryId = crypto.randomUUID();
-            let temporaryTitle = `Artigo ${i} (Geração do Título Falhou)`;
+            let temporaryTitle = `Artigo (Geração do Título Falhou)`;
             let currentPaper = '';
 
             try {
@@ -379,7 +376,7 @@ const App: React.FC = () => {
                 setGeneratedTitle('');
                 setFinalLatexCode('');
 
-                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando um título inovador para ${selectedDiscipline} (Modelo: ${analysisModel})...`);
+                setGenerationStatus(`Gerando um título inovador para ${selectedDiscipline}...`);
                 setGenerationProgress(5);
                 // Use getRandomTopic with selectedDiscipline
                 const randomTopic = getRandomTopic(selectedDiscipline);
@@ -387,7 +384,7 @@ const App: React.FC = () => {
                 temporaryTitle = await generatePaperTitle(randomTopic, language, analysisModel, selectedDiscipline);
                 setGeneratedTitle(temporaryTitle);
 
-                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando a primeira versão (Modelo: ${generationModel})...`);
+                setGenerationStatus(`Gerando a primeira versão do artigo...`);
                 setGenerationProgress(15);
                 const { paper: initialPaper, sources } = await generateInitialPaper(
                     temporaryTitle, 
@@ -402,13 +399,13 @@ const App: React.FC = () => {
                 for (let iter = 1; iter <= TOTAL_ITERATIONS; iter++) {
                     if (isGenerationCancelled.current) throw new Error("Operação cancelada pelo usuário.");
                     setGenerationProgress(15 + (iter / TOTAL_ITERATIONS) * 75);
-                    setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Analisando (iteração ${iter}/${TOTAL_ITERATIONS}) (Modelo: ${analysisModel})...`);
+                    setGenerationStatus(`Analisando (iteração ${iter}/${TOTAL_ITERATIONS})...`);
                     const analysisResult = await analyzePaper(currentPaper, pageCount, analysisModel);
                     const validAnalysisItems = analysisResult.analysis.filter(res => ANALYSIS_TOPICS.some(topic => topic.num === res.topicNum));
                     setAnalysisResults(prev => [...prev, { iteration: iter, results: validAnalysisItems.map(res => ({ topic: ANALYSIS_TOPICS.find(t => t.num === res.topicNum)!, score: res.score, scoreClass: getScoreClass(res.score), improvement: res.improvement })) }]);
                     if (!validAnalysisItems.some(res => res.score < 7.0)) break;
                     if (iter < TOTAL_ITERATIONS) {
-                        setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Refinando com base no feedback ${iter}... (Modelo: ${generationModel})`);
+                        setGenerationStatus(`Refinando com base no feedback ${iter}...`);
                         currentPaper = await improvePaper(currentPaper, { analysis: validAnalysisItems }, language, generationModel);
                     }
                 }
@@ -418,14 +415,14 @@ const App: React.FC = () => {
                 setFinalLatexCode(currentPaper);
                 setGenerationProgress(95);
                 let compiledFile: File | null = null;
-                const compilationUpdater = (message: string) => setGenerationStatus(`Artigo ${i}/${articlesToProcess}: ${message}`);
+                const compilationUpdater = (message: string) => setGenerationStatus(message);
                 const { pdfFile, finalCode } = await robustCompile(currentPaper, compilationUpdater);
                 compiledFile = pdfFile;
                 currentPaper = finalCode;
 
                 if (isGenerationCancelled.current) continue;
 
-                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Publicando no Zenodo...`);
+                setGenerationStatus(`Publicando no Zenodo...`);
                 setGenerationProgress(98);
                 const metadataForUpload = extractMetadata(currentPaper, true);
                 const keywordsForUpload = currentPaper.match(/\\keywords\{([^}]+)\}/)?.[1] || '';
@@ -469,7 +466,7 @@ const App: React.FC = () => {
                         const errorMessage = error instanceof Error ? error.message : `Tentativa ${attempt} falhou.`;
                         if (attempt === 10) throw new Error(`Falha ao enviar para o Zenodo após 10 tentativas. Erro final: ${errorMessage}`);
                         const delayTime = 15000 + (5000 * (attempt - 1));
-                        setGenerationStatus(`Artigo ${i}/${articlesToProcess}: ❌ ${errorMessage} Aguardando ${delayTime / 1000}s...`);
+                        setGenerationStatus(`❌ ${errorMessage} Aguardando ${delayTime / 1000}s...`);
                         await new Promise(resolve => setTimeout(resolve, delayTime));
                     }
                 }
@@ -484,13 +481,10 @@ const App: React.FC = () => {
                 const errorMessage = error instanceof Error ? error.message : `Ocorreu um erro desconhecido no artigo ${i}.`;
                 console.error(`Error processing article ${i}:`, error);
 
-                // Critical Error Handling: Stop automation on quota errors OR when rotation loop exhausted.
-                const lowerMsg = errorMessage.toLowerCase();
-                if (
-                    lowerMsg.includes('quota') || 
-                    lowerMsg.includes('exhausted') || 
-                    lowerMsg.includes('rotation loop')
-                ) {
+                // Critical Error Handling: Stop automation on quota errors.
+                if (errorMessage.toLowerCase().includes('quota') || errorMessage.toLowerCase().includes('exhausted')) {
+                    // Try to continue if multiple keys are available? 
+                    // No, the service handles rotation. If we are here, ALL keys are dead.
                     setGenerationStatus(`🛑 Limite de cota atingido em TODAS as chaves de API. A automação será pausada.`);
                     setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: 'upload_failed', latexCode: currentPaper, errorMessage: `Pausado por limite de cota global: ${errorMessage}` }]);
                     isGenerationCancelled.current = true; 
@@ -502,11 +496,11 @@ const App: React.FC = () => {
                 setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: status, latexCode: currentPaper, errorMessage: errorMessage }]);
                 
                 let pauseDuration = 3000;
-                if (lowerMsg.includes('network') || lowerMsg.includes('fetch')) {
+                if (errorMessage.toLowerCase().includes('network') || errorMessage.toLowerCase().includes('fetch')) {
                     setGenerationStatus(`🔌 Problema de rede detectado. Pausando por 1 minuto...`);
                     pauseDuration = 60000;
                 } else {
-                     setGenerationStatus(`❌ Erro no artigo ${i}: ${errorMessage}. Continuando para o próximo em 3s...`);
+                     setGenerationStatus(`❌ Erro no artigo: ${errorMessage}. Continuando para o próximo em 3s...`);
                 }
                 await new Promise(resolve => setTimeout(resolve, pauseDuration));
                 continue; // Continue to the next article in the loop for non-quota errors
@@ -524,19 +518,17 @@ const App: React.FC = () => {
                 return "❌ Automação cancelada pelo usuário."; // Default manual cancellation message
             });
         } else if (isContinuousMode) {
-            setGenerationStatus(`✅ Ciclo concluído. Pausa de 1 minuto antes do próximo artigo (Modo Contínuo)...`);
+            setGenerationStatus(`✅ Artigo concluído. Aguardando 1 minuto para o próximo...`);
             setTimeout(() => {
                 // Double-check flags before re-starting
                 if (isContinuousMode && !isGenerationCancelled.current) {
-                    // Start next cycle with just 1 article to keep cooldowns active
-                    // This STRICTLY ensures "GERAR APENAS UM ARTIGO POR VEZ" is followed in the recursion
                     handleFullAutomation(1);
                 }
-            }, 60000); // STRICTLY 60 seconds (1 minute) pause
+            }, 60000); // 60 seconds delay (1 minute)
         } else {
-            // This is for a normal, single batch completion
+            // This is for a normal, single run completion
             setGenerationProgress(100);
-            setGenerationStatus(`✅ Processo concluído! ${articlesToProcess} artigos processados.`);
+            setGenerationStatus(`✅ Processo concluído! Artigo processado.`);
             setStep(4);
         }
     };
@@ -709,41 +701,11 @@ const App: React.FC = () => {
     }
     
     const extractMetadata = (code: string, returnData = false) => {
-        // Use greedy matching (.*) to capture title even if it contains nested braces on the same line.
-        const titleMatch = code.match(/\\title\{(.*)\}/);
-        
-        // Robust cleaning function for LaTeX strings
-        const cleanLatexString = (str: string) => {
-            if (!str) return '';
-            let s = str;
-            // 1. Remove standard formatting commands with backslash
-            // Recursively remove common formatting commands: \textit{word} -> word, \textbf{word} -> word
-            for(let i=0; i<3; i++) {
-                s = s.replace(/\\(textit|textbf|emph|textsc|textsf|text|underline)\{([^}]+)\}/g, '$2');
-            }
-            
-            // 2. Extra Robustness: Remove formatting commands WITHOUT backslash
-            // This handles cases where '\' might have been stripped prematurely or input was malformed (e.g. textit{Word})
-            s = s.replace(/(textit|textbf|emph|textsc|textsf|text|underline)\{([^}]+)\}/g, '$2');
-
-            // 3. Remove escaped characters: \& -> &, \% -> %, \$ -> $
-            s = s.replace(/\\([&%$#_{}])/g, '$1');
-
-            // 4. Remove remaining braces if they are just grouping { }
-            s = s.replace(/\\{([^}]+)\\}/g, '$1'); // Fixed Regex for brace removal
-
-            // 5. Finally remove remaining backslashes (like in \'e -> 'e)
-            s = s.replace(/\\/g, ''); 
-            
-            return s.trim();
-        };
-
-        const title = titleMatch ? cleanLatexString(titleMatch[1]) : 'Untitled Paper';
+        const titleMatch = code.match(/\\title\{([^}]+)\}/);
+        const title = titleMatch ? titleMatch[1].replace(/\\/g, '') : 'Untitled Paper';
         
         const abstractMatch = code.match(/\\begin\{abstract\}([\s\S]*?)\\end\{abstract\}/);
-        let abstractText = abstractMatch ? abstractMatch[1] : '';
-        abstractText = abstractText.replace(/\\noindent\s*/g, '');
-        abstractText = cleanLatexString(abstractText);
+        const abstractText = abstractMatch ? abstractMatch[1].trim().replace(/\\noindent\s*/g, '').replace(/\\/g, '') : '';
         
         // Use dynamic author details for metadata extraction
         // The `authors` state already holds the necessary ZenodoAuthor[] structure
@@ -892,9 +854,6 @@ const App: React.FC = () => {
     const handleToggleContinuousMode = () => {
         const newStatus = !isContinuousMode;
         setIsContinuousMode(newStatus);
-        if (newStatus) {
-            setNumberOfArticles(1); // Force 1 to avoid "7 Artigos" text confusion
-        }
         localStorage.setItem('isContinuousMode', String(newStatus));
         if (!newStatus) isGenerationCancelled.current = true;
     };
@@ -996,7 +955,7 @@ const App: React.FC = () => {
                                 <LanguageSelector languages={LANGUAGES} selectedLanguage={language} onSelect={setLanguage} />
                                 <ModelSelector models={AVAILABLE_MODELS} selectedModel={analysisModel} onSelect={setAnalysisModel} label="Modelo Rápido (para análise e título):" />
                                 <ModelSelector models={AVAILABLE_MODELS} selectedModel={generationModel} onSelect={setGenerationModel} label="Modelo Poderoso (para geração e melhoria):" />
-                                <PageSelector options={[12]} selectedPageCount={pageCount} onSelect={setPageCount} />
+                                <PageSelector options={[12, 30, 60, 100]} selectedPageCount={pageCount} onSelect={setPageCount} />
                                 <div>
                                     <label htmlFor="discipline-select" className="font-semibold block mb-2">Disciplina para Geração de Título:</label>
                                     <select
@@ -1013,20 +972,9 @@ const App: React.FC = () => {
                                         ))}
                                     </select>
                                 </div>
-                                <div>
-                                    <label className="font-semibold block mb-2">Número de Artigos a Gerar (Manual):</label>
-                                    <input type="number" min="1" max="100" value={numberOfArticles} onChange={(e) => setNumberOfArticles(Math.max(1, Number(e.target.value)))} className="w-full" disabled={isContinuousMode || isSchedulerEnabled} />
-                                </div>
                             </div>
                             <div className="mt-6 text-center">
-                                <ActionButton 
-                                    onClick={() => handleFullAutomation()} 
-                                    disabled={isGenerating} 
-                                    isLoading={isGenerating} 
-                                    text={isContinuousMode ? "Iniciar Automação Contínua (1 por vez)" : `Iniciar Automação (${numberOfArticles} Artigo${numberOfArticles > 1 ? 's' : ''})`}
-                                    loadingText="Em Progresso..." 
-                                    completed={isGenerationComplete} 
-                                />
+                                <ActionButton onClick={() => handleFullAutomation(1)} disabled={isGenerating} isLoading={isGenerating} text={`Iniciar Automação (1 Artigo)`} loadingText="Em Progresso..." completed={isGenerationComplete} />
                                 {isGenerating && (<button onClick={() => { isGenerationCancelled.current = true; setGenerationStatus("🔄 Cancelando após o artigo atual..."); }} className="btn bg-red-600 text-white hover:bg-red-700 mt-4">Cancelar Automação</button>)}
                             </div>
                             
@@ -1034,12 +982,12 @@ const App: React.FC = () => {
                                 <div>
                                     <h4 className="font-semibold text-center mb-2 text-gray-700">Automação Contínua (Loop)</h4>
                                     <div className="flex items-center justify-center gap-2"><span className={`font-semibold transition-colors ${!isContinuousMode ? 'text-indigo-600' : 'text-gray-500'}`}>Off</span><label htmlFor="continuousToggle" className="relative inline-flex items-center cursor-pointer"><input type="checkbox" checked={isContinuousMode} onChange={handleToggleContinuousMode} id="continuousToggle" className="sr-only peer" /><div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div></label><span className={`font-semibold transition-colors ${isContinuousMode ? 'text-indigo-600' : 'text-gray-500'}`}>On</span></div>
-                                    <p className="text-center text-xs text-gray-500 mt-1">Gera um artigo por vez continuamente, com <strong>pausas de 1 minuto</strong>.</p>
+                                    <p className="text-center text-xs text-gray-500 mt-1">Gera 1 artigo, espera 1 minuto, repete.</p>
                                 </div>
                                  <div>
                                     <h4 className="font-semibold text-center mb-2 text-gray-700">Agendamento Automático</h4>
                                     <div className="flex items-center justify-center gap-2"><span className={`font-semibold transition-colors ${!isSchedulerEnabled ? 'text-indigo-600' : 'text-gray-500'}`}>Off</span><label htmlFor="schedulerToggle" className="relative inline-flex items-center cursor-pointer"><input type="checkbox" checked={isSchedulerEnabled} onChange={handleToggleScheduler} id="schedulerToggle" className="sr-only peer" /><div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div></label><span className={`font-semibold transition-colors ${isSchedulerEnabled ? 'text-indigo-600' : 'text-gray-500'}`}>On</span></div>
-                                    <p className="text-center text-xs text-gray-500 mt-1">Inicia lotes às 05h e 12h.</p>
+                                    <p className="text-center text-xs text-gray-500 mt-1">Inicia ciclos às 05h e 12h.</p>
                                 </div>
                             </div>
 
