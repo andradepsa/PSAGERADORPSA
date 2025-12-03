@@ -15,7 +15,6 @@ export const AVAILABLE_MODELS: {name: string, description: string}[] = [
     { name: 'gemini-2.5-flash', description: 'Fast and efficient for most tasks.' },
     { name: 'gemini-2.5-pro', description: 'More powerful for complex generation and reasoning.' },
     { name: 'gemini-3-pro-preview', description: 'Next-gen model for advanced reasoning and STEM tasks.' },
-    { name: 'gemini-2.0-flash', description: 'Optimized for high-frequency tasks.' },
     { name: 'grok-4-latest', description: 'Powerful model from x.ai.' },
 ];
 
