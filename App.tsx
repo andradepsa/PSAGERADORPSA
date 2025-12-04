@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide, verifyLatexStructure } from './services/geminiService';
 import type { Language, IterationAnalysis, PaperSource, AnalysisResult, StyleGuide, ArticleEntry, PersonalData } from './types';
-import { LANGUAGES, AVAILABLE_MODELS, ANALYSIS_TOPICS, ALL_TOPICS_BY_DISCIPLINE, getAllDisciplines, getRandomTopic, FIX_OPTIONS, STYLE_GUIDES, TOTAL_ITERATIONS } from './constants';
+import { LANGUAGES, AVAILABLE_MODELS, ANALYSIS_TOPICS, ALL_TOPICS_BY_DISCIPLINE, getAllDisciplines, getRandomTopic, FIX_OPTIONS, STYLE_GUIDES, TOTAL_ITERATIONS, DISCIPLINE_AUTHORS_MAP } from './constants';
 
 
 import LanguageSelector from './components/LanguageSelector';
@@ -94,28 +94,46 @@ const App: React.FC = () => {
     const [uploadStatus, setUploadStatus] = useState<React.ReactNode>(null);
     const [keywordsInput, setKeywordsInput] = useState('');
     
-    // State for author personal data, loaded from localStorage
-    const [authors, setAuthors] = useState<PersonalData[]>(() => {
-        try {
-            const stored = localStorage.getItem('all_authors_data');
-            const parsed = stored ? JSON.parse(stored) : [];
-            if (parsed.length === 0) {
-                // Default to a single author if no data found
-                return [{ 
-                    name: 'SÉRGIO DE ANDRADE, PAULO', 
-                    affiliation: 'Faculdade de Guarulhos (FG)', 
-                    orcid: '0009-0004-2555-3178' 
-                }];
-            }
-            return parsed;
-        } catch {
-            return [{ 
-                name: 'SÉRGIO DE ANDRADE, PAULO', 
-                affiliation: 'Faculdade de Guarulhos (FG)', 
-                orcid: '0009-0004-2555-3178' 
-            }];
+    // State for author personal data
+    // Initialize with a default structure, but it will be overridden by the effect below.
+    const [authors, setAuthors] = useState<PersonalData[]>([
+        { 
+            name: 'Revista, Zen', 
+            affiliation: 'Faculdade de Guarulhos (FG)', 
+            orcid: '0009-0007-6299-2008' 
+        },
+        { 
+            name: 'MATH, 10', 
+            affiliation: 'Faculdade de Guarulhos (FG)', 
+            orcid: '0009-0007-6299-2008' 
         }
-    });
+    ]);
+
+    // Effect to update authors whenever the selected Discipline changes
+    useEffect(() => {
+        const specificAuthorName = DISCIPLINE_AUTHORS_MAP[selectedDiscipline] || "AUTOR, GENÉRICO";
+
+        const fixedAuthors: PersonalData[] = [
+            {
+                name: 'Revista, Zen',
+                affiliation: 'Faculdade de Guarulhos (FG)',
+                orcid: '0009-0007-6299-2008'
+            },
+            {
+                name: specificAuthorName,
+                affiliation: 'Faculdade de Guarulhos (FG)',
+                orcid: '0009-0007-6299-2008'
+            }
+        ];
+        setAuthors(fixedAuthors);
+        
+        // Also update local storage to keep it in sync, although the logic is now driven by discipline
+        try {
+            localStorage.setItem('all_authors_data', JSON.stringify(fixedAuthors));
+        } catch (error) {
+            console.error("Failed to save author data to localStorage", error);
+        }
+    }, [selectedDiscipline]);
 
     // == AUTOMATION & SCHEDULER STATE ==
     const [isContinuousMode, setIsContinuousMode] = useState(() => {
@@ -146,15 +164,6 @@ const App: React.FC = () => {
             localStorage.removeItem('zenodo_api_key');
         }
     }, [zenodoToken]);
-
-    // Effect to save all author personal data to localStorage
-    useEffect(() => {
-        try {
-            localStorage.setItem('all_authors_data', JSON.stringify(authors));
-        } catch (error) {
-            console.error("Failed to save author data to localStorage", error);
-        }
-    }, [authors]);
 
     // Effect to save all article entries to localStorage
     useEffect(() => {

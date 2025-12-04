@@ -1,3 +1,4 @@
+
 import type { LanguageOption, AnalysisTopic, StyleGuideOption } from './types';
 
 export const TOTAL_ITERATIONS = 1;
@@ -71,6 +72,19 @@ export const FIX_OPTIONS: { key: string; label: string; description: string }[] 
         description: 'Checks if the document preamble uses only the allowed packages in the correct order as specified by the generation rules.'
     }
 ];
+
+export const DISCIPLINE_AUTHORS_MAP: Record<string, string> = {
+    "Mathematics": "MATH, 10",
+    "History of Humanity": "HISTORY, 10",
+    "Geography": "GEOGRAPHY, 10",
+    "Biology": "BIOLOGY, 10",
+    "Chemistry": "CHEMISTRY, 10",
+    "Physics": "PHYSICS, 10",
+    "Astronomy & Astrophysics": "ASTRO, 10",
+    "Philosophy": "PHILOSOPHY, 10",
+    "Literature": "LITERATURE, 10",
+    "Artificial Intelligence": "IA, 10"
+};
 
 export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
   "History of Humanity": [
@@ -915,6 +929,8 @@ export const ALL_TOPICS_BY_DISCIPLINE: Record<string, string[]> = {
     "    - Sentence embeddings"
   ]
 };
+
+export const DISCIPLINE_AUTHORS_MAP_BY_DISCIPLINE = DISCIPLINE_AUTHORS_MAP;
 
 /**
  * Returns a list of all available disciplines.
