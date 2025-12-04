@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Language, AnalysisResult, PaperSource, StyleGuide, SemanticScholarPaper, PersonalData } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES, SEMANTIC_SCHOLAR_API_BASE_URL } from '../constants';
@@ -338,6 +339,13 @@ function postProcessLatex(latexCode: string): string {
     // REMOVE MICROTYPE to prevent timeouts on web-based compilers
     code = code.replace(/\\usepackage(\[.*?\])?\{microtype\}/g, '% \\usepackage{microtype} removed to prevent timeout');
 
+    // FORCE REMOVAL OF URL PACKAGE to prevent timeouts and conflicts
+    // We remove explicit loading of 'url' package. 'hyperref' typically handles URLs well enough or provides \url.
+    code = code.replace(/\\usepackage(\[.*?\])?\{url\}/g, '% \\usepackage{url} removed to prevent timeout');
+    // Also remove 'url' if it appears in a comma-separated list of packages e.g. \usepackage{foo, url, bar}
+    // This regex looks for 'url' surrounded by commas or braces, with optional whitespace
+    code = code.replace(/,?\s*url\s*(?=,|})/g, '');
+
     // FORCE REMOVAL OF BIBLIOGRAPHY ENVIRONMENTS (Common AI hallucination despite instructions)
     // We convert \bibitem to simple \noindent paragraphs
     code = code.replace(/\\begin\{thebibliography\}\{.*?\}/g, '');
@@ -402,6 +410,10 @@ function postProcessLatex(latexCode: string): string {
         // Reassemble the code with the cleaned references section
         code = code.replace(fullMatch, `${sectionHeader}${cleanedContent}${endTag}`);
     }
+
+    // FINAL SAFETY: Convert any remaining \url{...} to plain text to avoid 'url' package dependency issues
+    // This uses a simple regex that might miss nested braces, but is usually sufficient for simple URLs
+    code = code.replace(/\\url\{([^}]+)\}/g, '$1');
 
     return code;
 }
@@ -525,7 +537,8 @@ export async function generateInitialPaper(title: string, language: Language, pa
     const latexAuthorsBlock = authorDetails.map((author, index) => {
         const name = author.name || 'Unknown Author';
         const affiliation = author.affiliation ? `\\\\ ${author.affiliation}` : '';
-        const orcid = author.orcid ? `\\\\ \\small ORCID: \\url{https://orcid.org/${author.orcid}}` : '';
+        // Use plain text for ORCID to avoid 'url' package dependencies
+        const orcid = author.orcid ? `\\\\ \\small ORCID: https://orcid.org/${author.orcid}` : '';
         return `${name}${affiliation}${orcid}`;
     }).join(' \\and\n'); // Use \and for multiple authors in LaTeX
 
@@ -856,6 +869,50 @@ Task: Return the COMPLETE, IMPROVED body starting with \\begin{document}.`;
     }
 
     return postProcessLatex(improvedBody);
+}
+
+export async function verifyLatexStructure(paperContent: string, model: string): Promise<string> {
+    // OPTIMIZATION: Compressed System Instruction
+    const systemInstruction = `Act as a LaTeX Syntax Validator & Linter.
+    
+    **PRIMARY TASK: Post-Iteration Safety Check**
+    Your goal is to ensure the LaTeX document is syntactically valid and compilation-ready.
+
+    **CHECKLIST:**
+    1.  **Structure:** Ensure the document has \\documentclass, \\begin{document}, and \\end{document}.
+    2.  **Balance:** Check for unbalanced braces {}, brackets [], or environments \\begin{...} without \\end{...}.
+    3.  **Forbidden Content (STRICT):** 
+        -   REMOVE any lingering \\begin{figure}, \\includegraphics, \\begin{table} (unless extremely simple), \\begin{algorithm}.
+        -   REMOVE any \\url or \\href links in the References section.
+    4.  **Escaping:** Fix unescaped special characters (%, &, _, $) in normal text.
+    5.  **Math Mode:** Ensure math symbols are inside $...$.
+
+    **OUTPUT:**
+    -   Return the COMPLETE, CORRECTED LaTeX document.
+    -   Do not output markdown code blocks if possible, just the raw text, or wrapped in \`\`\`latex.
+    `;
+
+    const userPrompt = `Review and fix the structure of this LaTeX document:
+    
+    \`\`\`latex
+    ${paperContent}
+    \`\`\`
+    `;
+
+    const response = await callModel(model, systemInstruction, userPrompt);
+
+    if (!response.text) {
+        throw new Error("AI returned an empty response for the verification step.");
+    }
+
+    let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
+
+    // Final safety check for closure
+    if (!paper.includes('\\end{document}')) {
+        paper += '\n\\end{document}';
+    }
+
+    return postProcessLatex(paper);
 }
 
 export async function fixLatexPaper(paperContent: string, compilationError: string, model: string): Promise<string> {

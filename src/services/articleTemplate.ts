@@ -4,7 +4,7 @@
 export const ARTICLE_TEMPLATE = `\\documentclass[12pt,a4paper]{article}
 \\usepackage[utf8]{inputenc}
 \\usepackage[T1]{fontenc}
-\\usepackage{amsmath, amssymb, geometry, setspace, url}
+\\usepackage{amsmath, amssymb, geometry, setspace}
 \\usepackage{verbatim}
 % Babel package will be added dynamically based on language
 \\usepackage[unicode=true]{hyperref}
