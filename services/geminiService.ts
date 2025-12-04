@@ -408,6 +408,51 @@ function postProcessLatex(latexCode: string): string {
 }
 
 /**
+ * Ensures the document has a proper closing tag.
+ * If the document is truncated (missing \end{document}), it aggressively cuts off 
+ * the incomplete sentence and appends a closure.
+ */
+function ensureDocumentEnds(latex: string): string {
+    if (latex.includes('\\end{document}')) return latex;
+
+    console.warn("⚠️ Document truncation detected. Applying safe closure logic.");
+
+    // 1. Find the last safe punctuation to avoid cutting in the middle of a word like "dimensio".
+    // We look for '.', '!', or '?' followed by a space or newline, or just the char itself if at end.
+    // Searching backwards from the end.
+    let cutoffIndex = -1;
+    const searchLimit = Math.max(0, latex.length - 1000); // Only look in the last 1000 chars
+    
+    for (let i = latex.length - 1; i >= searchLimit; i--) {
+        const char = latex[i];
+        if (char === '.' || char === '!' || char === '?') {
+            cutoffIndex = i + 1;
+            break;
+        }
+    }
+
+    let cleanLatex = latex;
+    if (cutoffIndex !== -1) {
+        cleanLatex = latex.substring(0, cutoffIndex);
+    }
+
+    // 2. Append a robust closure block.
+    // We assume the truncation likely happened in the body or conclusion.
+    // We add a safety section break just in case we are deep in a paragraph.
+    return cleanLatex + `
+
+% [SYSTEM NOTE: The AI generation was truncated. Closing document automatically to ensure valid PDF.]
+\\section{Conclusion (Auto-Recovered)}
+The analysis concludes here. The text was truncated due to length constraints, but the structural integrity of the document has been preserved.
+
+\\section*{References}
+% References were omitted due to truncation.
+\\noindent [1] Automatic System Recovery Citation.
+
+\\end{document}`;
+}
+
+/**
  * Strips comments from LaTeX code to save tokens.
  * Matches '%' that are at the start of a line OR not preceded by a backslash.
  */
@@ -532,21 +577,20 @@ export async function generateInitialPaper(title: string, language: Language, pa
 
     const pdfAuthorNames = authorDetails.map(a => a.name).filter(Boolean).join(', ');
 
-    // OPTIMIZATION: Compressed System Instruction
+    // OPTIMIZATION: Compressed System Instruction with STRICT CLOSURE RULES
     const systemInstruction = `Act as a world-class AI specialized in generating LaTeX scientific papers. Write a complete, rigorous paper based on the title, strictly following the provided LaTeX template.
 
 **Rules:**
 1.  **Template Filling (CRITICAL):** The template contains variables like \`[[__INTRODUCTION_CONTENT__]]\`. 
-    -   You MUST replace these variables with **ACTUAL, EXTENSIVE ACADEMIC TEXT**.
+    -   You MUST replace these variables with **ACTUAL ACADEMIC TEXT**.
     -   **NEVER** leave a variable like \`[[__...__]]\` in your output. It breaks the document.
 2.  **References:** Generate ${referenceCount} unique, **strictly academic citations**. Format as plain paragraphs (\\noindent ... \\par). NO \\bibitem. NO URLs.
 3.  **Language:** Write in **${languageName}**.
 4.  **Format:** Return valid LaTeX. NO ampersands (&) in text (use 'and'). NO CJK characters. Escape special chars (%, _, $). **CRITICAL: Any variable with an underscore (like O_X, p_value) MUST be wrapped in $...$ (e.g., $O_X$). Do not leave bare underscores in text.**
 5.  **Structure:** Do NOT change commands. PRESERVE \\author/\\date verbatim.
-6.  **Content:** Generate detailed content for each section to meet ~${pageCount} pages.
+6.  **Content Management:** Ensure the paper fits within the output limit. If you are running out of space, summarize the Results/Discussion, but you **MUST** include the Conclusion and **MUST** write \\end{document}.
 7.  **TOPIC 30 ENFORCEMENT:** NO VISUALS. NO figures, tables, or includegraphics. Text only.
 8.  **NO LINKS:** ABSOLUTELY NO URLs in References. Plain text citations only.
-9.  **COMPLETENESS:** You MUST finish the document. If you are running out of space, summarize the remaining sections, but you **MUST output \\end{document}**. Do not stop in the middle of a sentence.
 `;
 
     // Dynamically insert the babel package and reference placeholders into the template for the prompt
@@ -597,39 +641,36 @@ ${templateWithBabelAndAuthor}
     let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
     
     // === AUTO-CONTINUATION LOGIC ===
-    // If the paper does not end with the closing tag, assume truncation and try to continue.
+    // If the paper does not end with the closing tag, assume truncation and try to continue ONCE.
     if (!paper.includes('\\end{document}')) {
-        console.warn("⚠️ Initial generation truncated (no \\end{document}). Attempting auto-continuation...");
+        console.warn("⚠️ Initial generation truncated. Attempting one-shot completion...");
         
         const lastChunk = paper.slice(-2000); // Last ~2000 chars as context
         
         const continuationSystemInstruction = `You are an AI specialized in rescuing truncated LaTeX documents.
-        Your task is to seamlessly continue the text provided in the snippet and finish the document.
+        The previous generation stopped in the middle.
         
-        **CRITICAL RULES:**
-        1.  **Seamless Join:** Start EXACTLY where the snippet cuts off. Do not repeat the last sentence if it is complete, but complete it if it is cut off.
-        2.  **Finish the Job:** Generate the remaining sections (Discussion, Conclusion, References if missing).
-        3.  **Mandatory Close:** You MUST end the output with \\end{document}.
-        4.  **No Visuals:** Keep it text-only.`;
+        **TASK:**
+        1.  Complete the cut-off sentence naturally.
+        2.  Immediately write a brief Conclusion.
+        3.  Write the References section.
+        4.  **MANDATORY:** End with \\end{document}.
+        5.  Do not repeat the provided snippet, just continue from it.
+        `;
 
-        const continuationPrompt = `The following LaTeX document was cut off during generation.
-        
-        **LAST 2000 CHARACTERS OF DOCUMENT:**
+        const continuationPrompt = `**LAST 2000 CHARACTERS OF CUT-OFF DOCUMENT:**
         \`\`\`latex
         ${lastChunk}
         \`\`\`
         
-        **TASK:** Generate the rest of the document starting immediately from the end of the snippet above.`;
+        **ACTION:** Finish the document now.`;
 
         try {
             const contResponse = await callModel(model, continuationSystemInstruction, continuationPrompt);
             if (contResponse.text) {
                 let extension = contResponse.text.trim().replace(/^```latex\s*|```\s*$/g, '');
-                
-                // Safety check: sometimes models repeat the last few words. 
-                // We'll just append. Formatting might be slightly off (double space), but better than crash.
                 paper += "\n" + extension;
-                console.log("✅ Continuation appended successfully.");
+                console.log("✅ Continuation appended.");
             }
         } catch (err) {
             console.error("❌ Continuation attempt failed:", err);
@@ -637,11 +678,8 @@ ${templateWithBabelAndAuthor}
     }
     // ===============================
 
-    // Final safety check to ensure compilability
-    if (!paper.includes('\\end{document}')) {
-        console.warn("⚠️ Forced append of \\end{document} after failed continuation.");
-        paper += '\n\n% [AUTO-FIX: Document was truncated]\n\\end{document}';
-    }
+    // FINAL SAFETY NET: If it's still incomplete, force close it.
+    paper = ensureDocumentEnds(paper);
     
     const sources: PaperSource[] = response.candidates?.[0]?.groundingMetadata?.groundingChunks
         ?.filter(chunk => chunk.web)
@@ -921,21 +959,16 @@ Task: Return the COMPLETE, IMPROVED body starting with \\begin{document}.`;
     // ===============================================
 
     // STITCHING: If we successfully split, we must re-attach the preamble.
+    let fullPaper = improvedBody;
     if (docStartIndex !== -1 && !improvedBody.includes('\\documentclass')) {
         // AI behaved: It returned the body. Stitch it.
-        // Safety check: ensure \end{document} exists
-        if (!improvedBody.includes('\\end{document}')) {
-             improvedBody += '\n\\end{document}';
-        }
-        return postProcessLatex(preamble + "\n" + improvedBody);
-    } 
-    
-    // AI misbehaved or we didn't split: It returned a full doc. Return as is.
-    if (!improvedBody.includes('\\end{document}')) {
-        improvedBody += '\n\\end{document}';
+        fullPaper = preamble + "\n" + improvedBody;
     }
+    
+    // SAFETY NET: Ensure closure
+    fullPaper = ensureDocumentEnds(fullPaper);
 
-    return postProcessLatex(improvedBody);
+    return postProcessLatex(fullPaper);
 }
 
 export async function fixLatexPaper(paperContent: string, compilationError: string, model: string): Promise<string> {
@@ -977,9 +1010,7 @@ ${paperContent}
     let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
     
     // Ensure the paper ends with \end{document}
-    if (!paper.includes('\\end{document}')) {
-        paper += '\n\\end{document}';
-    }
+    paper = ensureDocumentEnds(paper);
 
     return postProcessLatex(paper);
 }
@@ -1020,9 +1051,7 @@ export async function reformatPaperWithStyleGuide(paperContent: string, styleGui
     let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
 
     // Ensure the paper ends with \end{document}
-    if (!paper.includes('\\end{document}')) {
-        paper += '\n\\end{document}';
-    }
+    paper = ensureDocumentEnds(paper);
 
     return postProcessLatex(paper);
 }
