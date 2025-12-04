@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
 import type { ZenodoAuthor, ExtractedMetadata } from '../types';
 
@@ -37,7 +38,11 @@ const ZenodoUploader = forwardRef<ZenodoUploaderRef, ZenodoUploaderProps>(({
         setPublicationLog(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`]);
     };
     
-    // Removed handleFileChange as file comes from App.tsx
+    // Helper to proxy Zenodo requests
+    const zenodoFetch = async (url: string, options: RequestInit = {}) => {
+        const proxyUrl = `/zenodo-proxy?target=${encodeURIComponent(url)}`;
+        return fetch(proxyUrl, options);
+    };
 
     const submit = async () => {
         if (!compiledPdfFile) {
@@ -65,7 +70,7 @@ const ZenodoUploader = forwardRef<ZenodoUploaderRef, ZenodoUploaderProps>(({
         try {
             // Step 1: Create a new deposition
             log("Step 1: Creating a new deposition...");
-            const dep_res = await fetch(`${ZENODO_API_URL}/deposit/depositions`, {
+            const dep_res = await zenodoFetch(`${ZENODO_API_URL}/deposit/depositions`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${zenodoToken}` },
                 body: JSON.stringify({})
@@ -77,10 +82,11 @@ const ZenodoUploader = forwardRef<ZenodoUploaderRef, ZenodoUploaderProps>(({
             }
             const deposition = await dep_res.json();
             const depositionId = deposition.id;
-            const filesUrl = deposition.links.files;
-            if (!filesUrl) {
-                throw new Error('Could not find the file upload URL in the Zenodo API response.');
-            }
+            // The links.files endpoint might be deprecated or behave differently for bucket uploads,
+            // but we stick to the older API path if that's what was working, or fallback to standard path.
+            // Using /files suffix on the deposition URL is standard for legacy Zenodo API.
+            const filesUrl = `${ZENODO_API_URL}/deposit/depositions/${depositionId}/files`;
+            
             log(`Deposition created successfully. ID: ${depositionId}`);
 
             // Step 2: Upload the file
@@ -88,9 +94,11 @@ const ZenodoUploader = forwardRef<ZenodoUploaderRef, ZenodoUploaderProps>(({
             const formData = new FormData();
             formData.append('file', compiledPdfFile, compiledPdfFile.name);
 
-            const file_res = await fetch(filesUrl, {
+            // Important: Do NOT set Content-Type header when sending FormData via fetch.
+            // The browser will automatically set it to multipart/form-data with the boundary.
+            const file_res = await zenodoFetch(filesUrl, {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${zenodoToken}` }, // Content-Type is not needed with FormData
+                headers: { 'Authorization': `Bearer ${zenodoToken}` }, 
                 body: formData
             });
 
@@ -116,7 +124,7 @@ const ZenodoUploader = forwardRef<ZenodoUploaderRef, ZenodoUploaderProps>(({
                     keywords: keywords.split(',').map(k => k.trim()).filter(k => k.length > 0)
                 }
             };
-            const meta_res = await fetch(`${ZENODO_API_URL}/deposit/depositions/${depositionId}`, {
+            const meta_res = await zenodoFetch(`${ZENODO_API_URL}/deposit/depositions/${depositionId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${zenodoToken}` },
                 body: JSON.stringify(metadata)
@@ -129,7 +137,7 @@ const ZenodoUploader = forwardRef<ZenodoUploaderRef, ZenodoUploaderProps>(({
 
             // Step 4: Publish
             log("Step 4: Publishing the deposition...");
-            const pub_res = await fetch(`${ZENODO_API_URL}/deposit/depositions/${depositionId}/actions/publish`, {
+            const pub_res = await zenodoFetch(`${ZENODO_API_URL}/deposit/depositions/${depositionId}/actions/publish`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${zenodoToken}` }
             });

@@ -235,6 +235,12 @@ const App: React.FC = () => {
         return 'bg-red-500';
     };
 
+    // Helper to proxy Zenodo requests to avoid CORS 403 errors
+    const zenodoFetch = async (url: string, options: RequestInit = {}) => {
+        const proxyUrl = `/zenodo-proxy?target=${encodeURIComponent(url)}`;
+        return fetch(proxyUrl, options);
+    };
+
     const robustCompile = async (
         codeToCompile: string,
         onStatusUpdate: (message: string) => void
@@ -431,23 +437,58 @@ const App: React.FC = () => {
                     if (isGenerationCancelled.current) break;
                     try {
                         const baseUrl = useSandbox ? 'https://sandbox.zenodo.org/api' : 'https://zenodo.org/api';
-                        const createResponse = await fetch(`${baseUrl}/deposit/depositions`, { method: 'POST', headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
-                        if (!createResponse.ok) throw new Error(`Erro ${createResponse.status} ao criar depósito.`);
+                        
+                        // STEP 1: Create Deposition (Use zenodoFetch)
+                        const createResponse = await zenodoFetch(`${baseUrl}/deposit/depositions`, { 
+                            method: 'POST', 
+                            headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' }, 
+                            body: JSON.stringify({}) 
+                        });
+                        
+                        if (!createResponse.ok) {
+                            const errorText = await createResponse.text();
+                            throw new Error(`Erro ${createResponse.status} ao criar depósito: ${errorText}`);
+                        }
                         const deposit = await createResponse.json();
+                        
+                        // STEP 2: Upload File (Use zenodoFetch with FormData)
                         const formData = new FormData();
                         formData.append('file', compiledFile, 'paper.pdf');
-                        const uploadResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}/files`, { method: 'POST', headers: { 'Authorization': `Bearer ${storedToken}` }, body: formData });
-                        if (!uploadResponse.ok) throw new Error('Falha no upload do PDF');
                         
+                        // Note: When using zenodoFetch (via proxy), we let the browser set the multipart boundary.
+                        // We simply pass the formData as body.
+                        const uploadResponse = await zenodoFetch(`${baseUrl}/deposit/depositions/${deposit.id}/files`, { 
+                            method: 'POST', 
+                            headers: { 'Authorization': `Bearer ${storedToken}` }, // No Content-Type, browser sets multipart
+                            body: formData 
+                        });
+                        
+                        if (!uploadResponse.ok) {
+                            const errorText = await uploadResponse.text();
+                            throw new Error(`Falha no upload do PDF (${uploadResponse.status}): ${errorText}`);
+                        }
+                        
+                        // STEP 3: Add Metadata (Use zenodoFetch)
                         const creators = authors.filter(a => a.name).map(author => ({
                             name: author.name,
                             orcid: author.orcid || undefined // Affiliation intentionally omitted for Zenodo
                         }));
 
                         const metadataPayload = { metadata: { title: metadataForUpload.title, upload_type: 'publication', publication_type: 'article', description: metadataForUpload.abstract, creators: creators, keywords: keywordsForUpload.split(',').map(k => k.trim()).filter(k => k) } };
-                        const metadataResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}`, { method: 'PUT', headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(metadataPayload) });
+                        const metadataResponse = await zenodoFetch(`${baseUrl}/deposit/depositions/${deposit.id}`, { 
+                            method: 'PUT', 
+                            headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' }, 
+                            body: JSON.stringify(metadataPayload) 
+                        });
+                        
                         if (!metadataResponse.ok) throw new Error('Falha ao atualizar metadados');
-                        const publishResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}/actions/publish`, { method: 'POST', headers: { 'Authorization': `Bearer ${storedToken}` } });
+                        
+                        // STEP 4: Publish (Use zenodoFetch)
+                        const publishResponse = await zenodoFetch(`${baseUrl}/deposit/depositions/${deposit.id}/actions/publish`, { 
+                            method: 'POST', 
+                            headers: { 'Authorization': `Bearer ${storedToken}` } 
+                        });
+                        
                         if (!publishResponse.ok) throw new Error('Falha ao publicar');
                         const published = await publishResponse.json();
                         publishedResult = { doi: published.doi, link: useSandbox ? `https://sandbox.zenodo.org/records/${deposit.id}` : `https://zenodo.org/records/${deposit.id}`, title: metadataForUpload.title, date: new Date().toISOString() };
@@ -584,7 +625,8 @@ const App: React.FC = () => {
                 try {
                     const baseUrl = useSandbox ? 'https://sandbox.zenodo.org/api' : 'https://zenodo.org/api';
                     
-                    const createResponse = await fetch(`${baseUrl}/deposit/depositions`, {
+                    // Use zenodoFetch proxy for all calls
+                    const createResponse = await zenodoFetch(`${baseUrl}/deposit/depositions`, {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' },
                         body: JSON.stringify({})
@@ -594,9 +636,10 @@ const App: React.FC = () => {
     
                     const formData = new FormData();
                     formData.append('file', compiledFile, 'paper.pdf');
-                    const uploadResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}/files`, {
+                    
+                    const uploadResponse = await zenodoFetch(`${baseUrl}/deposit/depositions/${deposit.id}/files`, {
                         method: 'POST',
-                        headers: { 'Authorization': `Bearer ${storedToken}` }, // Content-Type is not needed with FormData
+                        headers: { 'Authorization': `Bearer ${storedToken}` }, // Browser handles multipart headers
                         body: formData
                     });
                     if (!uploadResponse.ok) throw new Error('Falha no upload do PDF');
@@ -617,14 +660,14 @@ const App: React.FC = () => {
                             keywords: keywordsArray.length > 0 ? keywordsArray : undefined
                         }
                     };
-                    const metadataResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}`, {
+                    const metadataResponse = await zenodoFetch(`${baseUrl}/deposit/depositions/${deposit.id}`, {
                         method: 'PUT',
                         headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' },
                         body: JSON.stringify(metadataPayload)
                     });
                     if (!metadataResponse.ok) throw new Error('Falha ao atualizar metadados');
     
-                    const publishResponse = await fetch(`${baseUrl}/deposit/depositions/${deposit.id}/actions/publish`, {
+                    const publishResponse = await zenodoFetch(`${baseUrl}/deposit/depositions/${deposit.id}/actions/publish`, {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${storedToken}` }
                     });
