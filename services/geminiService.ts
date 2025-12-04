@@ -339,6 +339,13 @@ function postProcessLatex(latexCode: string): string {
     // REMOVE MICROTYPE to prevent timeouts on web-based compilers
     code = code.replace(/\\usepackage(\[.*?\])?\{microtype\}/g, '% \\usepackage{microtype} removed to prevent timeout');
 
+    // FORCE REMOVAL OF URL PACKAGE to prevent timeouts and conflicts
+    // We remove explicit loading of 'url' package. 'hyperref' typically handles URLs well enough or provides \url.
+    code = code.replace(/\\usepackage(\[.*?\])?\{url\}/g, '% \\usepackage{url} removed to prevent timeout');
+    // Also remove 'url' if it appears in a comma-separated list of packages e.g. \usepackage{foo, url, bar}
+    // This regex looks for 'url' surrounded by commas or braces, with optional whitespace
+    code = code.replace(/,?\s*url\s*(?=,|})/g, '');
+
     // FORCE REMOVAL OF BIBLIOGRAPHY ENVIRONMENTS (Common AI hallucination despite instructions)
     // We convert \bibitem to simple \noindent paragraphs
     code = code.replace(/\\begin\{thebibliography\}\{.*?\}/g, '');
@@ -403,6 +410,10 @@ function postProcessLatex(latexCode: string): string {
         // Reassemble the code with the cleaned references section
         code = code.replace(fullMatch, `${sectionHeader}${cleanedContent}${endTag}`);
     }
+
+    // FINAL SAFETY: Convert any remaining \url{...} to plain text to avoid 'url' package dependency issues
+    // This uses a simple regex that might miss nested braces, but is usually sufficient for simple URLs
+    code = code.replace(/\\url\{([^}]+)\}/g, '$1');
 
     return code;
 }
@@ -526,7 +537,8 @@ export async function generateInitialPaper(title: string, language: Language, pa
     const latexAuthorsBlock = authorDetails.map((author, index) => {
         const name = author.name || 'Unknown Author';
         const affiliation = author.affiliation ? `\\\\ ${author.affiliation}` : '';
-        const orcid = author.orcid ? `\\\\ \\small ORCID: \\url{https://orcid.org/${author.orcid}}` : '';
+        // Use plain text for ORCID to avoid 'url' package dependencies
+        const orcid = author.orcid ? `\\\\ \\small ORCID: https://orcid.org/${author.orcid}` : '';
         return `${name}${affiliation}${orcid}`;
     }).join(' \\and\n'); // Use \and for multiple authors in LaTeX
 
@@ -859,12 +871,56 @@ Task: Return the COMPLETE, IMPROVED body starting with \\begin{document}.`;
     return postProcessLatex(improvedBody);
 }
 
+// Function to validate structural integrity (first 10 and last 10 lines)
+function validateStructureIntegrity(content: string): { valid: boolean, errors: string[] } {
+    const lines = content.trim().split('\n');
+    const errors: string[] = [];
+
+    // Safety check for empty content
+    if (lines.length === 0) {
+        return { valid: false, errors: ["Document is empty."] };
+    }
+
+    // Check start (First 10 lines approx)
+    const headerSample = lines.slice(0, 15).join('\n'); // Increased to 15 to be safe
+    if (!headerSample.includes('\\documentclass')) {
+        errors.push("Missing \\documentclass in the beginning (Header truncated).");
+    }
+    
+    // Check end (Last 10 lines approx)
+    const footerSample = lines.slice(-15).join('\n'); // Increased to 15 to be safe
+    if (!footerSample.includes('\\end{document}')) {
+        errors.push("Missing \\end{document} at the end (Footer truncated).");
+    }
+
+    return { valid: errors.length === 0, errors };
+}
+
 export async function verifyLatexStructure(paperContent: string, model: string): Promise<string> {
+    // 1. Run Structural Integrity Check (Client-Side)
+    const integrity = validateStructureIntegrity(paperContent);
+    
+    let integrityPrompt = "";
+    if (!integrity.valid) {
+         console.warn(`[Verification] Structural Integrity Failed: ${integrity.errors.join(', ')}`);
+         integrityPrompt = `
+         **🚨 URGENT STRUCTURAL REPAIR NEEDED 🚨**
+         The input document is TRUNCATED or MALFORMED.
+         Detected issues: ${integrity.errors.join(' ')}
+         
+         **ACTION REQUIRED:**
+         - If missing Header: REGENERATE the standard LaTeX preamble (\\documentclass, packages, \\title, \\begin{document}, etc.).
+         - If missing Footer: REGENERATE the closing (\\end{document}).
+         - Ensure the document is a VALID, COMPLETE LaTeX file from start to finish.
+         `;
+    }
+
     // OPTIMIZATION: Compressed System Instruction
     const systemInstruction = `Act as a LaTeX Syntax Validator & Linter.
     
     **PRIMARY TASK: Post-Iteration Safety Check**
     Your goal is to ensure the LaTeX document is syntactically valid and compilation-ready.
+    ${integrityPrompt}
 
     **CHECKLIST:**
     1.  **Structure:** Ensure the document has \\documentclass, \\begin{document}, and \\end{document}.
