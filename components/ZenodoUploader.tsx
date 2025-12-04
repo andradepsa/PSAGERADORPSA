@@ -23,6 +23,7 @@ const ZenodoUploader = forwardRef<ZenodoUploaderRef, ZenodoUploaderProps>(({
     title, abstractText, keywords, authors, compiledPdfFile, onFileSelect, onPublishStart, onPublishSuccess, onPublishError,
     extractedMetadata
 }, ref) => {
+    // Default to TRUE (Sandbox) to avoid 403 errors with testing tokens
     const [useSandbox, setUseSandbox] = useState(true);
     const [zenodoToken, setZenodoToken] = useState(() => localStorage.getItem('zenodo_api_key') || ''); 
     const [publicationLog, setPublicationLog] = useState<string[]>([]);
@@ -77,14 +78,14 @@ const ZenodoUploader = forwardRef<ZenodoUploaderRef, ZenodoUploaderProps>(({
         setPublicationLog([]); // Clear previous logs
         log("🚀 Iniciando processo de publicação no Zenodo...");
 
-        const ZENODO_API_URL = useSandbox 
+        const baseUrl = useSandbox 
             ? 'https://sandbox.zenodo.org/api' 
             : 'https://zenodo.org/api';
 
         try {
             // Step 1: Create a new deposition
             log("📝 Passo 1: Criando depósito no Zenodo...");
-            const dep_res = await zenodoFetch(`${ZENODO_API_URL}/deposit/depositions`, {
+            const createResponse = await zenodoFetch(`${baseUrl}/deposit/depositions`, {
                 method: 'POST',
                 headers: { 
                     'Authorization': `Bearer ${zenodoToken}`,
@@ -93,48 +94,49 @@ const ZenodoUploader = forwardRef<ZenodoUploaderRef, ZenodoUploaderProps>(({
                 body: JSON.stringify({})
             });
 
-            if (!dep_res.ok) {
-                const errorText = await dep_res.text();
+            if (!createResponse.ok) {
+                const errorText = await createResponse.text();
                 let errorMsg = '';
                 
-                if (dep_res.status === 403) {
-                    errorMsg = `Erro 403 - Token sem permissão!\n\n`;
+                if (createResponse.status === 403) {
+                    errorMsg = `Erro 403 - Token sem permissão (ou Ambiente Incorreto)!\n`;
                     errorMsg += `Verifique:\n`;
-                    errorMsg += `1. Token tem os scopes: deposit:write e deposit:actions\n`;
-                    errorMsg += `2. Você está usando o ambiente correto:\n`;
-                    errorMsg += `   - Sandbox marcado? Use token de sandbox.zenodo.org\n`;
-                    errorMsg += `   - Sandbox desmarcado? Use token de zenodo.org\n`;
-                    errorMsg += `3. Token não está expirado\n\n`;
-                } else if (dep_res.status === 401) {
-                    errorMsg = `Erro 401 - Token inválido ou não fornecido`;
+                    errorMsg += `1. O Token tem os scopes: 'deposit:write' e 'deposit:actions'?\n`;
+                    errorMsg += `2. Você está no ambiente correto? (Sandbox vs Production)\n`;
+                    errorMsg += `   - Seu token é do sandbox.zenodo.org? Marque a caixa "Usar Zenodo Sandbox".\n`;
+                    errorMsg += `   - Seu token é do zenodo.org? Desmarque a caixa.\n`;
+                } else if (createResponse.status === 401) {
+                    errorMsg = `Erro 401 - Token inválido ou não fornecido.`;
                 } else {
-                    errorMsg = `Erro ${dep_res.status}: ${errorText}`;
+                    errorMsg = `Erro ${createResponse.status}: ${errorText}`;
                 }
                 throw new Error(errorMsg);
             }
 
-            const deposition = await dep_res.json();
-            const depositionId = deposition.id;
-            const filesUrl = `${ZENODO_API_URL}/deposit/depositions/${depositionId}/files`;
+            const deposit = await createResponse.json();
+            const depositionId = deposit.id;
             
             log(`✅ Depósito criado. ID: ${depositionId}`);
 
             // Step 2: Upload the file
             log(`📤 Passo 2: Fazendo upload do arquivo PDF...`);
             const formData = new FormData();
+            // Important: 'file' is the field name Zenodo expects
             formData.append('file', compiledPdfFile, compiledPdfFile.name || 'paper.pdf');
 
             // CRITICAL: When using zenodoFetch (proxy), we let the browser set the multipart boundary.
             // We pass the formData as body.
-            const file_res = await zenodoFetch(filesUrl, {
+            // Note: The HTML example uses direct fetch to ${baseUrl}/deposit/depositions/${deposit.id}/files
+            // We use the proxy to ensure CORS doesn't block us.
+            const uploadResponse = await zenodoFetch(`${baseUrl}/deposit/depositions/${depositionId}/files`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${zenodoToken}` }, // No Content-Type, browser sets multipart
                 body: formData
             });
 
-            if (!file_res.ok) {
-                const errorText = await file_res.text();
-                throw new Error(`Erro ao fazer upload (${file_res.status}): ${errorText}`);
+            if (!uploadResponse.ok) {
+                const errorText = await uploadResponse.text();
+                throw new Error(`Erro ao fazer upload (${uploadResponse.status}): ${errorText}`);
             }
             log("✅ Upload concluído com sucesso.");
             
@@ -150,13 +152,14 @@ const ZenodoUploader = forwardRef<ZenodoUploaderRef, ZenodoUploaderProps>(({
                     description: abstractText,
                     creators: authors.filter(a => a.name.trim().length > 0).map(author => ({
                         name: author.name,
-                        orcid: author.orcid || undefined // Affiliation intentionally omitted for Zenodo
+                        affiliation: author.affiliation || undefined,
+                        orcid: author.orcid || undefined
                     })),
                     keywords: keywordsArray.length > 0 ? keywordsArray : undefined
                 }
             };
 
-            const meta_res = await zenodoFetch(`${ZENODO_API_URL}/deposit/depositions/${depositionId}`, {
+            const metadataResponse = await zenodoFetch(`${baseUrl}/deposit/depositions/${depositionId}`, {
                 method: 'PUT',
                 headers: { 
                     'Authorization': `Bearer ${zenodoToken}`,
@@ -165,32 +168,37 @@ const ZenodoUploader = forwardRef<ZenodoUploaderRef, ZenodoUploaderProps>(({
                 body: JSON.stringify(metadataPayload)
             });
 
-            if (!meta_res.ok) {
-                const errorText = await meta_res.text();
-                throw new Error(`Erro ao atualizar metadados (${meta_res.status}): ${errorText}`);
+            if (!metadataResponse.ok) {
+                const errorText = await metadataResponse.text();
+                throw new Error(`Erro ao atualizar metadados (${metadataResponse.status}): ${errorText}`);
             }
             log("✅ Metadados atualizados com sucesso.");
 
             // Step 4: Publish
             log("🎯 Passo 4: Publicando artigo...");
-            const pub_res = await zenodoFetch(`${ZENODO_API_URL}/deposit/depositions/${depositionId}/actions/publish`, {
+            const publishResponse = await zenodoFetch(`${baseUrl}/deposit/depositions/${depositionId}/actions/publish`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${zenodoToken}` }
             });
 
-            if (!pub_res.ok) {
-                const errorText = await pub_res.text();
-                throw new Error(`Erro ao publicar (${pub_res.status}): ${errorText}`);
+            if (!publishResponse.ok) {
+                const errorText = await publishResponse.text();
+                throw new Error(`Erro ao publicar (${publishResponse.status}): ${errorText}`);
             }
 
-            const finalResult = await pub_res.json();
+            const published = await publishResponse.json();
+            
+            const zenodoLink = useSandbox 
+                ? `https://sandbox.zenodo.org/records/${depositionId}`
+                : `https://zenodo.org/records/${depositionId}`;
+
             log("🎉 Artigo publicado com sucesso!");
-            log(`DOI: ${finalResult.doi}`);
-            log(`Link: ${finalResult.links.html}`);
+            log(`DOI: ${published.doi}`);
+            log(`Link: ${zenodoLink}`);
 
             onPublishSuccess({
-                doi: finalResult.doi,
-                zenodoLink: finalResult.links.html
+                doi: published.doi,
+                zenodoLink: zenodoLink
             });
 
         } catch (error) {
@@ -281,7 +289,7 @@ const ZenodoUploader = forwardRef<ZenodoUploaderRef, ZenodoUploaderProps>(({
                         aria-checked={useSandbox}
                     />
                     <span className="ml-2 text-sm font-medium text-gray-900">
-                        Usar Zenodo Sandbox (Testes)
+                        Usar Zenodo Sandbox (Recomendado para Testes)
                     </span>
                 </label>
             </div>

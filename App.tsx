@@ -87,7 +87,8 @@ const App: React.FC = () => {
         authors: [] as Author[],
         keywords: ''
     });
-    const [useSandbox, setUseSandbox] = useState(false);
+    // CHANGED DEFAULT TO TRUE TO PREVENT 403 ERRORS IN TESTING
+    const [useSandbox, setUseSandbox] = useState(true);
     // Initialize Zenodo token from localStorage
     const [zenodoToken, setZenodoToken] = useState(() => localStorage.getItem('zenodo_api_key') || '');
     const [isUploading, setIsUploading] = useState(false);
@@ -447,7 +448,11 @@ const App: React.FC = () => {
                         
                         if (!createResponse.ok) {
                             const errorText = await createResponse.text();
-                            throw new Error(`Erro ${createResponse.status} ao criar depósito: ${errorText}`);
+                            let errorMsg = `Erro ${createResponse.status}: ${errorText}`;
+                            if(createResponse.status === 403) {
+                                errorMsg = `Erro 403 (FORBIDDEN): Token sem permissão ou incompatível com o ambiente (Sandbox/Prod).`;
+                            }
+                            throw new Error(errorMsg);
                         }
                         const deposit = await createResponse.json();
                         
@@ -633,7 +638,11 @@ const App: React.FC = () => {
                     });
                     if (!createResponse.ok) {
                         const errorText = await createResponse.text();
-                        throw new Error(`Erro ${createResponse.status}: Falha ao criar depósito. ${errorText}`);
+                        let errorMsg = `Erro ${createResponse.status}: Falha ao criar depósito. ${errorText}`;
+                        if(createResponse.status === 403) {
+                            errorMsg = `Erro 403 (FORBIDDEN): Token inválido ou ambiente incorreto (Sandbox/Prod).`;
+                        }
+                        throw new Error(errorMsg);
                     }
                     const deposit = await createResponse.json();
     
