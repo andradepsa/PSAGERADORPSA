@@ -452,14 +452,14 @@ const App: React.FC = () => {
                         const deposit = await createResponse.json();
                         
                         // STEP 2: Upload File (Use zenodoFetch with FormData)
+                        // IMPORTANT: We use zenodoFetch (proxy) so we do NOT set Content-Type header manually.
+                        // The browser sets multipart/form-data boundary automatically when body is FormData.
                         const formData = new FormData();
                         formData.append('file', compiledFile, 'paper.pdf');
                         
-                        // Note: When using zenodoFetch (via proxy), we let the browser set the multipart boundary.
-                        // We simply pass the formData as body.
                         const uploadResponse = await zenodoFetch(`${baseUrl}/deposit/depositions/${deposit.id}/files`, { 
                             method: 'POST', 
-                            headers: { 'Authorization': `Bearer ${storedToken}` }, // No Content-Type, browser sets multipart
+                            headers: { 'Authorization': `Bearer ${storedToken}` }, 
                             body: formData 
                         });
                         
@@ -631,7 +631,10 @@ const App: React.FC = () => {
                         headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' },
                         body: JSON.stringify({})
                     });
-                    if (!createResponse.ok) throw new Error(`Erro ${createResponse.status}: Falha ao criar depósito.`);
+                    if (!createResponse.ok) {
+                        const errorText = await createResponse.text();
+                        throw new Error(`Erro ${createResponse.status}: Falha ao criar depósito. ${errorText}`);
+                    }
                     const deposit = await createResponse.json();
     
                     const formData = new FormData();
@@ -642,7 +645,10 @@ const App: React.FC = () => {
                         headers: { 'Authorization': `Bearer ${storedToken}` }, // Browser handles multipart headers
                         body: formData
                     });
-                    if (!uploadResponse.ok) throw new Error('Falha no upload do PDF');
+                    if (!uploadResponse.ok) {
+                        const errorText = await uploadResponse.text();
+                        throw new Error(`Falha no upload do PDF (${uploadResponse.status}): ${errorText}`);
+                    }
     
                     const keywordsArray = keywordsForUpload.split(',').map(k => k.trim()).filter(k => k);
                     const creators = authors.filter(a => a.name).map(author => ({
