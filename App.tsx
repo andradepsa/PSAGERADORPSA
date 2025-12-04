@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect, useRef } from 'react';
-import { generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide } from './services/geminiService';
+import { generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide, verifyLatexStructure } from './services/geminiService';
 import type { Language, IterationAnalysis, PaperSource, AnalysisResult, StyleGuide, ArticleEntry, PersonalData } from './types';
 import { LANGUAGES, AVAILABLE_MODELS, ANALYSIS_TOPICS, ALL_TOPICS_BY_DISCIPLINE, getAllDisciplines, getRandomTopic, FIX_OPTIONS, STYLE_GUIDES, TOTAL_ITERATIONS } from './constants';
 
@@ -394,6 +395,12 @@ const App: React.FC = () => {
                 }
 
                 if (isGenerationCancelled.current) continue;
+
+                // === STEP: POST-ITERATION STRUCTURAL VERIFICATION ===
+                setGenerationStatus("🏗️ Verificação Final: Auditando integridade estrutural do LaTeX...");
+                setGenerationProgress(90);
+                currentPaper = await verifyLatexStructure(currentPaper, generationModel);
+                // ====================================================
 
                 setFinalLatexCode(currentPaper);
                 setGenerationProgress(95);
