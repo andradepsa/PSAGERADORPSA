@@ -1,6 +1,6 @@
 import type { LanguageOption, AnalysisTopic, StyleGuideOption } from './types';
 
-export const TOTAL_ITERATIONS = 12;
+export const TOTAL_ITERATIONS = 3;
 
 export const LANGUAGES: LanguageOption[] = [
     { code: 'en', name: 'English', flag: '🇬🇧' },
