@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import type { Language, AnalysisResult, PaperSource, StyleGuide, SemanticScholarPaper, PersonalData } from '../types';
 import { ANALYSIS_TOPICS, LANGUAGES, FIX_OPTIONS, STYLE_GUIDES, SEMANTIC_SCHOLAR_API_BASE_URL } from '../constants';
@@ -144,7 +143,7 @@ async function executeWithKeyRotation<T>(
             }
 
             // If it's not a quota error, or we ran out of keys, throw the error up
-            // Note: If we are on the last key and it fails with quota, the loop ends and we throw.
+            // Note: If we are on the last key and it fails on quota, the loop ends and we throw.
             if (attempt === maxAttempts - 1) {
                 // If this was the last key, we modify the error message to ensure App.tsx detects it as exhaustion
                 if (shouldRotate) {
@@ -229,18 +228,44 @@ async function callModel(
 
     if (model.startsWith('gemini-')) {
         // Wrap the generation logic in the rotation handler
-        return executeWithKeyRotation(async (aiClient) => {
-            return aiClient.models.generateContent({
-                model: model,
-                contents: userPrompt,
-                config: {
-                    systemInstruction: systemInstruction,
-                    ...(config.jsonOutput && { responseMimeType: "application/json" }),
-                    ...(config.responseSchema && { responseSchema: config.responseSchema }),
-                    ...(config.googleSearch && { tools: [{ googleSearch: {} }] }),
-                },
-            });
-        }, model);
+        try {
+            return await executeWithKeyRotation(async (aiClient) => {
+                return aiClient.models.generateContent({
+                    model: model,
+                    contents: userPrompt,
+                    config: {
+                        systemInstruction: systemInstruction,
+                        ...(config.jsonOutput && { responseMimeType: "application/json" }),
+                        ...(config.responseSchema && { responseSchema: config.responseSchema }),
+                        ...(config.googleSearch && { tools: [{ googleSearch: {} }] }),
+                    },
+                });
+            }, model);
+        } catch (error) {
+            const errStr = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+            const isQuotaExhausted = errStr.includes('exhausted') || errStr.includes('quota') || errStr.includes('limit') || errStr.includes('429');
+
+            // Fallback Logic requested: If gemini-2.5-flash fails due to quota, switch to gemini-2.0-flash
+            if (isQuotaExhausted && model === 'gemini-2.5-flash') {
+                const fallbackModel = 'gemini-2.0-flash';
+                console.warn(`[Gemini Service] Primary model ${model} quota exhausted. Falling back to ${fallbackModel} as requested.`);
+                
+                return await executeWithKeyRotation(async (aiClient) => {
+                    return aiClient.models.generateContent({
+                        model: fallbackModel,
+                        contents: userPrompt,
+                        config: {
+                            systemInstruction: systemInstruction,
+                            ...(config.jsonOutput && { responseMimeType: "application/json" }),
+                            ...(config.responseSchema && { responseSchema: config.responseSchema }),
+                            ...(config.googleSearch && { tools: [{ googleSearch: {} }] }),
+                        },
+                    });
+                }, fallbackModel);
+            }
+
+            throw error;
+        }
 
     } else if (model.startsWith('grok-')) {
         // Grok logic remains unchanged (single key support)
@@ -303,7 +328,7 @@ async function callModel(
 export async function generatePaperTitle(topic: string, language: Language, model: string, discipline: string): Promise<string> {
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
 
-    // OPTIMIZATION: Compressed System Instruction
+    // OPTIMIZATION: Compressed system instruction for token saving
     const systemInstruction = `Act as an expert academic researcher in ${discipline}. Generate a single, compelling, high-impact scientific paper title.`;
     
     // Updated user prompt to remove hardcoded "mathematical" bias
@@ -334,86 +359,15 @@ function postProcessLatex(latexCode: string): string {
     
     // CRITICAL: Strip CJK (Chinese, Japanese, Korean) characters
     // The default pdflatex compiler does not support these characters and will crash.
+    // We remove them to ensure the paper compiles.
+    // Ranges:
+    // \u4e00-\u9fff (Common CJK)
+    // \u3400-\u4dbf (Extension A)
+    // \uf900-\ufaff (Compatibility)
+    // \u3040-\u309f (Hiragana)
+    // \u30a0-\u30ff (Katakana)
+    // \uac00-\ud7af (Hangul)
     code = code.replace(/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g, '');
-
-    // REMOVE MICROTYPE to prevent timeouts on web-based compilers
-    code = code.replace(/\\usepackage(\[.*?\])?\{microtype\}/g, '% \\usepackage{microtype} removed to prevent timeout');
-
-    // FORCE REMOVAL OF URL PACKAGE to prevent timeouts and conflicts
-    // We remove explicit loading of 'url' package. 'hyperref' typically handles URLs well enough or provides \url.
-    code = code.replace(/\\usepackage(\[.*?\])?\{url\}/g, '% \\usepackage{url} removed to prevent timeout');
-    // Also remove 'url' if it appears in a comma-separated list of packages e.g. \usepackage{foo, url, bar}
-    // This regex looks for 'url' surrounded by commas or braces, with optional whitespace
-    code = code.replace(/,?\s*url\s*(?=,|})/g, '');
-
-    // FORCE REMOVAL OF BIBLIOGRAPHY ENVIRONMENTS (Common AI hallucination despite instructions)
-    // We convert \bibitem to simple \noindent paragraphs
-    code = code.replace(/\\begin\{thebibliography\}\{.*?\}/g, '');
-    code = code.replace(/\\end\{thebibliography\}/g, '');
-    code = code.replace(/\\bibitem\{.*?\}/g, '\n\n\\noindent ');
-
-    // SURGICAL FIX FOR TOPIC 30 (No Visuals & LaTeX Fixes)
-    // We programmatically STRIP AND DELETE figure and table environments and includegraphics commands
-    // to ensure the paper is text-only and compilation-safe.
-    
-    // Remove \includegraphics commands
-    code = code.replace(/\\includegraphics(\[.*?\])?\{.*?\}/gi, '');
-    
-    // Remove figure environments
-    code = code.replace(/\\begin\{figure\*?\}([\s\S]*?)\\end\{figure\*?\}/gi, '');
-    
-    // Remove table environments
-    code = code.replace(/\\begin\{table\*?\}([\s\S]*?)\\end\{table\*?\}/gi, '');
-    
-    // Remove algorithm/listing environments if present
-    code = code.replace(/\\begin\{algorithm\*?\}([\s\S]*?)\\end\{algorithm\*?\}/gi, '');
-    code = code.replace(/\\begin\{listing\*?\}([\s\S]*?)\\end\{listing\*?\}/gi, '');
-    code = code.replace(/\\begin\{tikzpicture\}([\s\S]*?)\\end\{tikzpicture\}/gi, '');
-
-    // --------------------------------------------------------------------------------
-    // NEW: SURGICAL FIX FOR "Missing $ inserted" (O_X, D^b)
-    // --------------------------------------------------------------------------------
-    // Replaces occurrences of O_X or D^b that are NOT surrounded by $ with $...$
-    // This catches common hallucinations where standard algebraic notation is treated as text.
-    // The regex looks for O_X preceded by start-of-line or space, and followed by space or punctuation.
-    code = code.replace(/(^|\s)(O_X|D\^b)(\s|[.,;:]|$)/g, '$1$$$2$$$3');
-
-    // --------------------------------------------------------------------------------
-    // NEW: AGGRESSIVE URL REMOVAL FROM REFERENCES SECTION ONLY
-    // --------------------------------------------------------------------------------
-    const refSectionRegex = /(\\section\{(?:References|Referências)\})([\s\S]*?)(\\end\{document\}|$)/i;
-    const match = code.match(refSectionRegex);
-
-    if (match) {
-        const [fullMatch, sectionHeader, content, endTag] = match;
-        let cleanedContent = content;
-
-        // 1. Remove \url{...} commands completely
-        cleanedContent = cleanedContent.replace(/\\url\{[^}]+\}/g, '');
-        
-        // 2. Remove \href{url}{text} commands, keeping only the text
-        // This regex captures the second brace content (text) and replaces the whole command with it.
-        cleanedContent = cleanedContent.replace(/\\href\{[^}]+\}\{([^}]+)\}/g, '$1');
-        
-        // 3. Remove raw http/https text
-        cleanedContent = cleanedContent.replace(/https?:\/\/[^\s}]+/g, '');
-        
-        // 4. Remove standard prefixes often found before links
-        cleanedContent = cleanedContent.replace(/(?:Available at|Retrieved from|Acessado em|Disponível em|Doi|DOI):\s*[,.;]?/gi, '');
-        
-        // 5. Clean up empty parentheses or brackets that might be left over: () or []
-        cleanedContent = cleanedContent.replace(/\(\s*\)/g, '').replace(/\[\s*\]/g, '');
-        
-        // 6. Fix double dots or trailing dots left by removals
-        cleanedContent = cleanedContent.replace(/\.\s*\./g, '.');
-
-        // Reassemble the code with the cleaned references section
-        code = code.replace(fullMatch, `${sectionHeader}${cleanedContent}${endTag}`);
-    }
-
-    // FINAL SAFETY: Convert any remaining \url{...} to plain text to avoid 'url' package dependency issues
-    // This uses a simple regex that might miss nested braces, but is usually sufficient for simple URLs
-    code = code.replace(/\\url\{([^}]+)\}/g, '$1');
 
     return code;
 }
@@ -537,8 +491,7 @@ export async function generateInitialPaper(title: string, language: Language, pa
     const latexAuthorsBlock = authorDetails.map((author, index) => {
         const name = author.name || 'Unknown Author';
         const affiliation = author.affiliation ? `\\\\ ${author.affiliation}` : '';
-        // Use plain text for ORCID to avoid 'url' package dependencies
-        const orcid = author.orcid ? `\\\\ \\small ORCID: https://orcid.org/${author.orcid}` : '';
+        const orcid = author.orcid ? `\\\\ \\small ORCID: \\url{https://orcid.org/${author.orcid}}` : '';
         return `${name}${affiliation}${orcid}`;
     }).join(' \\and\n'); // Use \and for multiple authors in LaTeX
 
@@ -548,17 +501,12 @@ export async function generateInitialPaper(title: string, language: Language, pa
     const systemInstruction = `Act as a world-class AI specialized in generating LaTeX scientific papers. Write a complete, rigorous paper based on the title, strictly following the provided LaTeX template.
 
 **Rules:**
-1.  **Template Filling (CRITICAL):** The template contains variables like \`[[__INTRODUCTION_CONTENT__]]\`. 
-    -   You MUST replace these variables with **ACTUAL, EXTENSIVE ACADEMIC TEXT**.
-    -   **NEVER** leave a variable like \`[[__...__]]\` in your output. It breaks the document.
-    -   Example: Replace \`[[__INTRODUCTION_CONTENT__]]\` with 5-10 paragraphs defining the problem statement, context, and research objectives.
-2.  **References:** Generate ${referenceCount} unique, **strictly academic citations**. Format as plain paragraphs (\\noindent ... \\par). NO \\bibitem. NO URLs.
+1.  **Use Template:** Fill all placeholders [INSERT...] with relevant content.
+2.  **References:** Generate ${referenceCount} unique, **strictly academic citations** from peer-reviewed journals, scholarly books, and conference papers. **You MUST AVOID citing general websites, blogs, or news articles.** Format as plain paragraphs (\\noindent ... \\par). NO \\bibitem. NO URLs.
 3.  **Language:** Write in **${languageName}**.
-4.  **Format:** Return valid LaTeX. NO ampersands (&) in text (use 'and'). NO CJK characters. Escape special chars (%, _, $). **CRITICAL: Any variable with an underscore (like O_X, p_value) MUST be wrapped in $...$ (e.g., $O_X$). Do not leave bare underscores in text.**
+4.  **Format:** Return valid LaTeX. NO ampersands (&) in text (use 'and'). NO CJK characters. Escape special chars (%, _, $).
 5.  **Structure:** Do NOT change commands. PRESERVE \\author/\\date verbatim.
 6.  **Content:** Generate detailed content for each section to meet ~${pageCount} pages.
-7.  **TOPIC 30 ENFORCEMENT:** NO VISUALS. NO figures, tables, or includegraphics. Text only.
-8.  **NO LINKS:** ABSOLUTELY NO URLs in References. Plain text citations only.
 `;
 
     // Dynamically insert the babel package and reference placeholders into the template for the prompt
@@ -566,7 +514,10 @@ export async function generateInitialPaper(title: string, language: Language, pa
         '% Babel package will be added dynamically based on language',
         `\\usepackage[${babelLanguage}]{babel}`
     ).replace(
-        '[[__REFERENCES_LIST__]]',
+        '[INSERT REFERENCE COUNT]',
+        String(referenceCount)
+    ).replace(
+        '[INSERT NEW REFERENCE LIST HERE]',
         referencePlaceholders
     );
 
@@ -576,12 +527,8 @@ export async function generateInitialPaper(title: string, language: Language, pa
         latexAuthorsBlock
     );
     templateWithBabelAndAuthor = templateWithBabelAndAuthor.replace(
-        '__PDF_AUTHOR_NAMES_PLACEHOLDER__', // Placeholder for pdfauthor in hypersetup
-        pdfAuthorNames
-    );
-    templateWithBabelAndAuthor = templateWithBabelAndAuthor.replace(
-        /\[\[__TITLE__\]\]/g, // Global replace for title
-        title
+        'pdfauthor={__PDF_AUTHOR_NAMES_PLACEHOLDER__}', // Placeholder for pdfauthor in hypersetup
+        `pdfauthor={${pdfAuthorNames}}`
     );
 
     const userPrompt = `Title: "${title}".
@@ -684,14 +631,19 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
     let cleanPaper = stripLatexComments(paperContent);
     
     // OPTIMIZATION: Strip References section for ANALYSIS ONLY.
+    // The references consume a lot of tokens but aren't strictly necessary for the AI to judge structure/flow/argumentation.
+    // This saves ~10-15% input tokens.
+    // Regex matches \section{References} or \section{Referências} and everything following it until the end of the string.
     cleanPaper = cleanPaper.replace(/\\section\{(?:References|Referências)\}[\s\S]*$/, '');
 
     // CRITICAL FIX: Detect ungenerated placeholders in the FULL content BEFORE stripping context.
-    // We use a regex to catch [[__...__]] style or old [INSERT...] style placeholders.
-    const placeholderRegex = /\[\[__.*__\]\]|\[INSERT.*(?:CONTENT|REFERENCE).*\]/i;
-    const hasUnfilledPlaceholders = placeholderRegex.test(cleanPaper);
+    // If the strategic extraction removes the middle sections (where the placeholders usually are),
+    // the AI won't see them and will give a high score, ending the loop prematurely.
+    const hasUnfilledPlaceholders = cleanPaper.includes('[INSERT NEW CONTENT');
 
     // OPTIMIZATION: Context Stripping / Strategic Extraction
+    // We only send the Abstract, Introduction and Conclusion for analysis to save massive tokens.
+    // The middleware is assumed good if the "bookends" (Intro/Conclusion) are solid.
     const contextObj = extractStrategicContext(cleanPaper);
     const paperToAnalyze = contextObj.text;
 
@@ -725,19 +677,19 @@ export async function analyzePaper(paperContent: string, pageCount: number, mode
             const result = JSON.parse(jsonText) as AnalysisResult;
 
             // POST-ANALYSIS OVERRIDE
-            // If we detected placeholders, we MUST force the "Improvement" step to act as a "Filler".
-            // We overwrite the score for Topic 29 (No Placeholders) to 0.0.
+            // If we detected placeholders in the full text, we MUST force the "Improvement" step.
+            // We overwrite the score for Topic 13 (Structure) to ensure the Editor AI fixes it.
             if (hasUnfilledPlaceholders) {
-                console.warn("⚠️ Placeholder variables detected in content. Forcing score downgrade.");
-                const placeholderTopicIndex = result.analysis.findIndex(a => a.topicNum === 29);
+                console.warn("⚠️ Placeholder detected in content. Forcing score downgrade.");
+                const structureTopicIndex = result.analysis.findIndex(a => a.topicNum === 13);
                 const placeholderCritique = {
-                    topicNum: 29,
-                    score: 0.0, // Force 0.0 to ensure improvement loop picks it up
-                    improvement: "FATAL ERROR: The document contains unfilled template variables (e.g., [[__INTRODUCTION_CONTENT__]]). You MUST replace these specific tokens with extensive, generated scientific content immediately."
+                    topicNum: 13,
+                    score: 2.0,
+                    improvement: "CRITICAL: The document contains unfinished template placeholders (e.g., [INSERT NEW CONTENT...]). You MUST generate the missing content for these sections immediately."
                 };
 
-                if (placeholderTopicIndex !== -1) {
-                    result.analysis[placeholderTopicIndex] = placeholderCritique;
+                if (structureTopicIndex !== -1) {
+                    result.analysis[structureTopicIndex] = placeholderCritique;
                 } else {
                     result.analysis.push(placeholderCritique);
                 }
@@ -767,50 +719,23 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     const improvementPoints = analysis.analysis
         .filter(item => item.score < 8.5)
         .map(item => {
+            // FIX: Corrected property access from 'item.num' to 'item.topicNum'
             const topic = ANALYSIS_TOPICS.find(t => t.num === item.topicNum);
             const topicName = topic ? topic.name : `UNKNOWN TOPIC (${item.topicNum})`;
             return `- **${topicName}**: ${item.improvement}`;
         })
         .join('\n');
 
-    // CHECK FOR PLACEHOLDERS IN INPUT CONTENT
-    // Catches [[__...__]] style and old [INSERT...] style
-    const placeholderRegex = /\[\[__.*__\]\]|\[INSERT.*(?:CONTENT|REFERENCE).*\]/i;
-    const hasPlaceholders = placeholderRegex.test(paperContent);
-    
-    let placeholderInstruction = "";
-    // If placeholders exist, we switch modes from "Improve" to "Complete the content"
-    if (hasPlaceholders) {
-        placeholderInstruction = `
-    **🚨 CRITICAL ALERT: TEMPLATE VARIABLES DETECTED 🚨**
-    The input document contains raw variables like \`[[__INTRODUCTION_CONTENT__]]\` or \`[INSERT...]\`.
-    **YOUR PRIMARY TASK IS TO FILL THESE HOLES.**
-    -   Replace \`[[__INTRODUCTION_CONTENT__]]\` with a full Introduction section.
-    -   Replace \`[[__LITERATURE_REVIEW_CONTENT__]]\` with a comprehensive review.
-    -   Replace \`[[__METHODOLOGY_CONTENT__]]\` with a detailed methodology.
-    -   Replace \`[[__RESULTS_CONTENT__]]\` with hypothetical but realistic results.
-    -   Replace \`[[__DISCUSSION_CONTENT__]]\` with in-depth analysis.
-    -   Replace \`[[__CONCLUSION_CONTENT__]]\` with a conclusion.
-    **DO NOT LEAVE THESE VARIABLES IN THE TEXT. GENERATE THE MISSING CONTENT.**
-        `;
-    }
-
     // OPTIMIZATION: Compressed System Instruction
-    const systemInstruction = `Act as an expert LaTeX editor. Refine the provided paper body.
-
-    ${placeholderInstruction}
+    const systemInstruction = `Act as an expert LaTeX editor. Refine the provided paper body based on suggestions.
 
     **Rules:**
     1.  **Scope:** Improve ONLY the provided body content.
     2.  **Output:** Return valid LaTeX body (from \\begin{document} to \\end{document}). NO Preamble.
     3.  **Language:** **${languageName}**.
     4.  **Formatting:** NO \\bibitem. NO URLs. Use 'and' instead of '&'. NO CJK chars.
-    5.  **TOPIC 30 ENFORCEMENT (STRICT):**
-        -   **NO VISUALS:** Do NOT generate \\begin{figure}, \\includegraphics, or \\begin{table}.
-        -   **MATH / MISSING $:** Ensure all math symbols (<, >, +, -) are inside $...$.
-        -   **UNDERSCORES:** Check for loose underscores (e.g., \`O_X\`). If it is math/notation, wrap in \`$...\$\` (e.g., $O_X$). If text, escape as \`\\_\`.
-    6.  **No Placeholders:** Search and replace any remaining variable tokens with concrete data.
-    7.  **Safety:** Do not add \\newpage.
+    5.  **Placeholders:** Fill any remaining placeholders like [INSERT NEW CONTENT...].
+    6.  **Safety:** Do not add \\newpage. Do not add images.
     `;
 
     // Strip comments to reduce input token usage, AI will rewrite content anyway
@@ -819,6 +744,7 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     // OPTIMIZATION: PREAMBLE SURGERY
     // We split the Preamble (static) from the Body (dynamic).
     // We send ONLY the body to the AI to be rewritten, saving massive Output tokens.
+    // We send the Preamble only as context.
     const docStartIndex = cleanPaper.indexOf('\\begin{document}');
     let preamble = "";
     let bodyToImprove = cleanPaper;
@@ -827,10 +753,11 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
         preamble = cleanPaper.substring(0, docStartIndex);
         bodyToImprove = cleanPaper.substring(docStartIndex);
     } else {
+        // Fallback if document structure is weird: Send full text
         console.warn("Could not find \\begin{document} for splitting. Sending full text.");
     }
 
-    const userPrompt = `Context (Preamble - DO NOT EDIT/OUTPUT THIS - USE TITLE FROM HERE FOR CONTEXT):
+    const userPrompt = `Context (Preamble - DO NOT EDIT/OUTPUT THIS):
 ${preamble}
 
 Body to Improve:
@@ -841,11 +768,8 @@ ${improvementPoints}
 
 Task: Return the COMPLETE, IMPROVED body starting with \\begin{document}.`;
 
-    // DYNAMIC MODEL SELECTION:
-    // If we have placeholders, we need a smarter model (Pro) to generate content from scratch.
-    const modelToUse = hasPlaceholders ? model : 'gemini-2.5-flash';
-
-    const response = await callModel(modelToUse, systemInstruction, userPrompt);
+    // FORCED OPTIMIZATION: Use flash model to save quota/tokens during improvement loop
+    const response = await callModel('gemini-2.5-flash', systemInstruction, userPrompt);
     
     if (!response.candidates || response.candidates.length === 0) {
         throw new Error("AI returned no candidates for improvement.");
@@ -858,12 +782,15 @@ Task: Return the COMPLETE, IMPROVED body starting with \\begin{document}.`;
     let improvedBody = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
 
     // STITCHING: If we successfully split, we must re-attach the preamble.
+    // We check if the AI followed instructions and returned only the body (starts with \begin{document} or similar)
+    // or if it returned a full document (contains \documentclass).
     if (docStartIndex !== -1 && !improvedBody.includes('\\documentclass')) {
         // AI behaved: It returned the body. Stitch it.
         return postProcessLatex(preamble + "\n" + improvedBody);
     } 
     
     // AI misbehaved or we didn't split: It returned a full doc. Return as is.
+    // Ensure the paper ends with \end{document}
     if (!improvedBody.includes('\\end{document}')) {
         improvedBody += '\n\\end{document}';
     }
@@ -871,110 +798,18 @@ Task: Return the COMPLETE, IMPROVED body starting with \\begin{document}.`;
     return postProcessLatex(improvedBody);
 }
 
-// Function to validate structural integrity (first 10 and last 10 lines)
-function validateStructureIntegrity(content: string): { valid: boolean, errors: string[] } {
-    const lines = content.trim().split('\n');
-    const errors: string[] = [];
-
-    // Safety check for empty content
-    if (lines.length === 0) {
-        return { valid: false, errors: ["Document is empty."] };
-    }
-
-    // Check start (First 10 lines approx)
-    const headerSample = lines.slice(0, 15).join('\n'); // Increased to 15 to be safe
-    if (!headerSample.includes('\\documentclass')) {
-        errors.push("Missing \\documentclass in the beginning (Header truncated).");
-    }
-    
-    // Check end (Last 10 lines approx)
-    const footerSample = lines.slice(-15).join('\n'); // Increased to 15 to be safe
-    if (!footerSample.includes('\\end{document}')) {
-        errors.push("Missing \\end{document} at the end (Footer truncated).");
-    }
-
-    return { valid: errors.length === 0, errors };
-}
-
-export async function verifyLatexStructure(paperContent: string, model: string): Promise<string> {
-    // 1. Run Structural Integrity Check (Client-Side)
-    const integrity = validateStructureIntegrity(paperContent);
-    
-    let integrityPrompt = "";
-    if (!integrity.valid) {
-         console.warn(`[Verification] Structural Integrity Failed: ${integrity.errors.join(', ')}`);
-         integrityPrompt = `
-         **🚨 URGENT STRUCTURAL REPAIR NEEDED 🚨**
-         The input document is TRUNCATED or MALFORMED.
-         Detected issues: ${integrity.errors.join(' ')}
-         
-         **ACTION REQUIRED:**
-         - If missing Header: REGENERATE the standard LaTeX preamble (\\documentclass, packages, \\title, \\begin{document}, etc.).
-         - If missing Footer: REGENERATE the closing (\\end{document}).
-         - Ensure the document is a VALID, COMPLETE LaTeX file from start to finish.
-         `;
-    }
-
-    // OPTIMIZATION: Compressed System Instruction
-    const systemInstruction = `Act as a LaTeX Syntax Validator & Linter.
-    
-    **PRIMARY TASK: Post-Iteration Safety Check**
-    Your goal is to ensure the LaTeX document is syntactically valid and compilation-ready.
-    ${integrityPrompt}
-
-    **CHECKLIST:**
-    1.  **Structure:** Ensure the document has \\documentclass, \\begin{document}, and \\end{document}.
-    2.  **Balance:** Check for unbalanced braces {}, brackets [], or environments \\begin{...} without \\end{...}.
-    3.  **Forbidden Content (STRICT):** 
-        -   REMOVE any lingering \\begin{figure}, \\includegraphics, \\begin{table} (unless extremely simple), \\begin{algorithm}.
-        -   REMOVE any \\url or \\href links in the References section.
-    4.  **Escaping:** Fix unescaped special characters (%, &, _, $) in normal text.
-    5.  **Math Mode:** Ensure math symbols are inside $...$.
-
-    **OUTPUT:**
-    -   Return the COMPLETE, CORRECTED LaTeX document.
-    -   Do not output markdown code blocks if possible, just the raw text, or wrapped in \`\`\`latex.
-    `;
-
-    const userPrompt = `Review and fix the structure of this LaTeX document:
-    
-    \`\`\`latex
-    ${paperContent}
-    \`\`\`
-    `;
-
-    const response = await callModel(model, systemInstruction, userPrompt);
-
-    if (!response.text) {
-        throw new Error("AI returned an empty response for the verification step.");
-    }
-
-    let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
-
-    // Final safety check for closure
-    if (!paper.includes('\\end{document}')) {
-        paper += '\n\\end{document}';
-    }
-
-    return postProcessLatex(paper);
-}
-
 export async function fixLatexPaper(paperContent: string, compilationError: string, model: string): Promise<string> {
     // OPTIMIZATION: Compressed System Instruction
     const systemInstruction = `Act as an expert LaTeX debugger. Fix compilation errors.
 
-    **CRITICAL PRIORITY: TOPIC 30 ENFORCEMENT**
-    1.  **NO VISUALS:** DELETE all \\begin{figure} ... \\end{figure}, \\begin{table} ... \\end{table}, \\includegraphics{...}, \\begin{algorithm} ... \\end{algorithm}. Do NOT comment them out, DELETE them.
-    2.  **MATH/UNDERSCORES:** The error "Missing $ inserted" is frequently caused by unescaped underscores in text mode (e.g. "variable_name", "O_X").
-        -   **SPECIFIC FIX:** If you see 'O_X', 'D^b', 'p_i' or similar algebraic notation in text, wrap it in $...$ (e.g., $O_X$, $D^b$).
-        -   If it's just a text underscore, escape it (variable\\_name).
-    3.  **MATH SYMBOLS:** Ensure <, >, +, -, = are inside $...$ if used mathematically.
-    4.  **REFERENCES:** If the error involves \\bibitem or \\thebibliography, convert the bibliography to simple paragraphs using \\noindent. Remove \\url commands.
-
-    **General Rules:**
-    1.  **Precision:** Fix the specific error found in the log.
-    2.  **Output:** Return the FULL, CORRECTED, VALID LaTeX document.
-    3.  **Formatting:** No \\bibitem (use plain text), No \\cite (use plain text), No URLs. No CJK chars.
+    **Rules:**
+    1.  **Precision:** Fix ONLY the error. Do not refactor.
+    2.  **Output:** Full valid LaTeX document.
+    3.  **Specific Fixes:**
+        -   Error "&": Replace with 'and'.
+        -   Error "Unicode": Remove CJK chars (Chinese/Japanese).
+        -   Error "Preamble": Simplify metadata if broken. Preserve \\author block.
+    4.  **Prohibited:** NO \\bibitem, NO \\cite, NO URLs.
     `;
 
     const userPrompt = `Error:
@@ -1017,10 +852,8 @@ export async function reformatPaperWithStyleGuide(paperContent: string, styleGui
     **Rules:**
     1.  **Style:** ${styleGuideInfo.name}.
     2.  **Scope:** Edit ONLY content in \\section{References}. Keep preamble/body exact.
-    3.  **Format:** Plain list paragraphs starting with \\noindent. 
-    4.  **STRICT PROHIBITION:** DO NOT use \\bibitem, \\begin{thebibliography}, or \\end{thebibliography}.
-    5.  **STRICT PROHIBITION:** DO NOT include URLs, DOIs, or hyperlinks. Text citations only.
-    6.  **Output:** Full LaTeX document.
+    3.  **Format:** Plain list. NO \\bibitem. NO URLs.
+    4.  **Output:** Full LaTeX document.
     `;
 
     const userPrompt = `Reformat references to ${styleGuideInfo.name}.

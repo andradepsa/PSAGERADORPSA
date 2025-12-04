@@ -1,8 +1,7 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-import { generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide, verifyLatexStructure } from './services/geminiService';
+import { generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide } from './services/geminiService';
 import type { Language, IterationAnalysis, PaperSource, AnalysisResult, StyleGuide, ArticleEntry, PersonalData } from './types';
-import { LANGUAGES, AVAILABLE_MODELS, ANALYSIS_TOPICS, ALL_TOPICS_BY_DISCIPLINE, getAllDisciplines, getRandomTopic, FIX_OPTIONS, STYLE_GUIDES, TOTAL_ITERATIONS, DISCIPLINE_AUTHORS_MAP } from './constants';
+import { LANGUAGES, AVAILABLE_MODELS, ANALYSIS_TOPICS, ALL_TOPICS_BY_DISCIPLINE, getAllDisciplines, getRandomTopic, FIX_OPTIONS, STYLE_GUIDES, TOTAL_ITERATIONS, DISCIPLINE_AUTHORS } from './constants';
 
 
 import LanguageSelector from './components/LanguageSelector';
@@ -37,7 +36,6 @@ type PublishedArticle = {
 
 // Main App Component
 const App: React.FC = () => {
-    console.log('App component rendering...'); // Diagnostic log
     // Overall workflow step
     const [step, setStep] = useState(1);
     const [isApiModalOpen, setIsApiModalOpen] = useState(false);
@@ -47,6 +45,7 @@ const App: React.FC = () => {
     const [language, setLanguage] = useState<Language>('en');
     const [generationModel, setGenerationModel] = useState('gemini-2.5-flash');
     const [analysisModel, setAnalysisModel] = useState('gemini-2.5-flash');
+    // REMOVIDAS AS OPÇÕES DE 30, 60, 100 PAGINAS. PADRÃO FIXO EM 12.
     const [pageCount, setPageCount] = useState(12);
     const [isGenerating, setIsGenerating] = useState(false);
     const [generationProgress, setGenerationProgress] = useState(0);
@@ -57,6 +56,7 @@ const App: React.FC = () => {
     const [finalLatexCode, setFinalLatexCode] = useState('');
     const [isGenerationComplete, setIsGenerationComplete] = useState(false);
     const isGenerationCancelled = useRef(false);
+    const [numberOfArticles, setNumberOfArticles] = useState(1);
     // Replaced publishedArticles with articleEntries
     const [articleEntries, setArticleEntries] = useState<ArticleEntry[]>(() => {
         try {
@@ -87,54 +87,35 @@ const App: React.FC = () => {
         authors: [] as Author[],
         keywords: ''
     });
-    // CHANGED DEFAULT TO TRUE TO PREVENT 403 ERRORS IN TESTING
-    const [useSandbox, setUseSandbox] = useState(true);
+    const [useSandbox, setUseSandbox] = useState(false);
     // Initialize Zenodo token from localStorage
     const [zenodoToken, setZenodoToken] = useState(() => localStorage.getItem('zenodo_api_key') || '');
     const [isUploading, setIsUploading] = useState(false);
     const [uploadStatus, setUploadStatus] = useState<React.ReactNode>(null);
     const [keywordsInput, setKeywordsInput] = useState('');
     
-    // State for author personal data
-    // Initialize with a default structure, but it will be overridden by the effect below.
-    const [authors, setAuthors] = useState<PersonalData[]>([
-        { 
-            name: 'Revista, Zen', 
-            affiliation: 'Faculdade de Guarulhos (FG)', 
-            orcid: '0009-0007-6299-2008' 
-        },
-        { 
-            name: 'MATH, 10', 
-            affiliation: 'Faculdade de Guarulhos (FG)', 
-            orcid: '0009-0007-6299-2008' 
-        }
-    ]);
-
-    // Effect to update authors whenever the selected Discipline changes
-    useEffect(() => {
-        const specificAuthorName = DISCIPLINE_AUTHORS_MAP[selectedDiscipline] || "AUTOR, GENÉRICO";
-
-        const fixedAuthors: PersonalData[] = [
-            {
-                name: 'Revista, Zen',
-                affiliation: 'Faculdade de Guarulhos (FG)',
-                orcid: '0009-0007-6299-2008'
-            },
-            {
-                name: specificAuthorName,
-                affiliation: 'Faculdade de Guarulhos (FG)',
-                orcid: '0009-0007-6299-2008'
-            }
-        ];
-        setAuthors(fixedAuthors);
-        
-        // Also update local storage to keep it in sync, although the logic is now driven by discipline
+    // State for author personal data, loaded from localStorage
+    const [authors, setAuthors] = useState<PersonalData[]>(() => {
         try {
-            localStorage.setItem('all_authors_data', JSON.stringify(fixedAuthors));
-        } catch (error) {
-            console.error("Failed to save author data to localStorage", error);
+            const stored = localStorage.getItem('all_authors_data');
+            const parsed = stored ? JSON.parse(stored) : [];
+            if (parsed.length === 0) {
+                // Default to a single author if no data found
+                return [{ 
+                    name: 'SÉRGIO DE ANDRADE, PAULO', 
+                    affiliation: 'Faculdade de Guarulhos (FG)', 
+                    orcid: '0009-0004-2555-3178' 
+                }];
+            }
+            return parsed;
+        } catch {
+            return [{ 
+                name: 'SÉRGIO DE ANDRADE, PAULO', 
+                affiliation: 'Faculdade de Guarulhos (FG)', 
+                orcid: '0009-0004-2555-3178' 
+            }];
         }
-    }, [selectedDiscipline]);
+    });
 
     // == AUTOMATION & SCHEDULER STATE ==
     const [isContinuousMode, setIsContinuousMode] = useState(() => {
@@ -165,6 +146,33 @@ const App: React.FC = () => {
             localStorage.removeItem('zenodo_api_key');
         }
     }, [zenodoToken]);
+
+    // Effect to save all author personal data to localStorage
+    useEffect(() => {
+        try {
+            localStorage.setItem('all_authors_data', JSON.stringify(authors));
+        } catch (error) {
+            console.error("Failed to save author data to localStorage", error);
+        }
+    }, [authors]);
+
+    // Effect to automatically update authors based on selected discipline
+    useEffect(() => {
+        const fixedAuthor1 = {
+            name: 'Revista, Zen',
+            affiliation: 'Faculdade de Guarulhos (FG)',
+            orcid: '0009-0007-6299-2008'
+        };
+
+        const author2Name = DISCIPLINE_AUTHORS[selectedDiscipline] || 'RESEARCHER, 10';
+        const dynamicAuthor2 = {
+            name: author2Name,
+            affiliation: 'Faculdade de Guarulhos (FG)',
+            orcid: '0009-0007-6299-2008'
+        };
+
+        setAuthors([fixedAuthor1, dynamicAuthor2]);
+    }, [selectedDiscipline]);
 
     // Effect to save all article entries to localStorage
     useEffect(() => {
@@ -214,7 +222,9 @@ const App: React.FC = () => {
 
             schedulerTimeoutRef.current = window.setTimeout(() => {
                 console.log("Scheduler triggered! Starting automatic run...");
-                if (!isGenerating) handleFullAutomation();
+                // Start with 1 article, continuous mode will handle the loop if enabled,
+                // otherwise it's just 1 scheduled article.
+                if (!isGenerating) handleFullAutomation(1); 
                 scheduleNextRun();
             }, delay);
         };
@@ -231,15 +241,10 @@ const App: React.FC = () => {
 
 
     const getScoreClass = (score: number) => {
+        if (score >= 9.5) return 'bg-blue-600'; // MESTRE DOS GÊNIOS
         if (score >= 8.5) return 'bg-green-500';
         if (score >= 7.0) return 'bg-yellow-500';
         return 'bg-red-500';
-    };
-
-    // Helper to proxy Zenodo requests to avoid CORS 403 errors
-    const zenodoFetch = async (url: string, options: RequestInit = {}) => {
-        const proxyUrl = `/zenodo-proxy?target=${encodeURIComponent(url)}`;
-        return fetch(proxyUrl, options);
     };
 
     const robustCompile = async (
@@ -289,7 +294,7 @@ const App: React.FC = () => {
         }
         
         if (lastError) {
-            onStatusUpdate(`⚠️ Compilação falhou. Tentando corrigir o código com IA...`);
+            onStatusUpdate(`⚠️ Compilação falhou. Tentando corrigir o código com IA (Modelo: ${analysisModel})...`);
             console.log("Initiating AI Fix...");
             console.log("Error Reason (Full Log sent to AI):", lastError.message);
             
@@ -335,11 +340,10 @@ const App: React.FC = () => {
         throw new Error("Falha na compilação após todas as tentativas.");
     };
 
-    const handleFullAutomation = async () => {
-        // ALWAYS process 1 article per cycle.
-        // If continuous mode is on, we'll recurse at the end.
-        const articlesToProcess = 1;
-        
+    const handleFullAutomation = async (batchSizeOverride?: number) => {
+        // Important: In Continuous Mode, we default to a batch size of 1 to allow for cooldowns between papers.
+        // This ensures "GERAR APENAS UM ARTIGO POR VEZ" as requested.
+        const articlesToProcess = batchSizeOverride ?? (isContinuousMode ? 1 : numberOfArticles);
         const storedToken = localStorage.getItem('zenodo_api_key');
         if (!storedToken) {
             alert('❌ Token Zenodo não encontrado! Por favor, configure-o nas definições (ícone de engrenagem) antes de iniciar.');
@@ -360,12 +364,11 @@ const App: React.FC = () => {
         setUploadStatus(null);
         setStep(1);
         
-        // Loop runs effectively once, but structure allows easy expansion if needed internally
         for (let i = 1; i <= articlesToProcess; i++) {
             if (isGenerationCancelled.current) break;
             
             const articleEntryId = crypto.randomUUID();
-            let temporaryTitle = `Artigo (Geração do Título Falhou)`;
+            let temporaryTitle = `Artigo ${i} (Geração do Título Falhou)`;
             let currentPaper = '';
 
             try {
@@ -376,7 +379,7 @@ const App: React.FC = () => {
                 setGeneratedTitle('');
                 setFinalLatexCode('');
 
-                setGenerationStatus(`Iniciando novo artigo em ${selectedDiscipline}...`);
+                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando um título inovador para ${selectedDiscipline} (Modelo: ${analysisModel})...`);
                 setGenerationProgress(5);
                 // Use getRandomTopic with selectedDiscipline
                 const randomTopic = getRandomTopic(selectedDiscipline);
@@ -384,7 +387,7 @@ const App: React.FC = () => {
                 temporaryTitle = await generatePaperTitle(randomTopic, language, analysisModel, selectedDiscipline);
                 setGeneratedTitle(temporaryTitle);
 
-                setGenerationStatus(`Gerando rascunho inicial...`);
+                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando a primeira versão (Modelo: ${generationModel})...`);
                 setGenerationProgress(15);
                 const { paper: initialPaper, sources } = await generateInitialPaper(
                     temporaryTitle, 
@@ -399,101 +402,75 @@ const App: React.FC = () => {
                 for (let iter = 1; iter <= TOTAL_ITERATIONS; iter++) {
                     if (isGenerationCancelled.current) throw new Error("Operação cancelada pelo usuário.");
                     setGenerationProgress(15 + (iter / TOTAL_ITERATIONS) * 75);
-                    setGenerationStatus(`Analisando qualidade (iteração ${iter}/${TOTAL_ITERATIONS})...`);
+                    setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Analisando (iteração ${iter}/${TOTAL_ITERATIONS}) (Modelo: ${analysisModel})...`);
                     const analysisResult = await analyzePaper(currentPaper, pageCount, analysisModel);
                     const validAnalysisItems = analysisResult.analysis.filter(res => ANALYSIS_TOPICS.some(topic => topic.num === res.topicNum));
                     setAnalysisResults(prev => [...prev, { iteration: iter, results: validAnalysisItems.map(res => ({ topic: ANALYSIS_TOPICS.find(t => t.num === res.topicNum)!, score: res.score, scoreClass: getScoreClass(res.score), improvement: res.improvement })) }]);
                     if (!validAnalysisItems.some(res => res.score < 7.0)) break;
                     if (iter < TOTAL_ITERATIONS) {
-                        setGenerationStatus(`Refinando com base no feedback ${iter}...`);
+                        setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Refinando com base no feedback ${iter}... (Modelo: ${generationModel})`);
                         currentPaper = await improvePaper(currentPaper, { analysis: validAnalysisItems }, language, generationModel);
                     }
                 }
 
                 if (isGenerationCancelled.current) continue;
 
-                // === STEP: POST-ITERATION STRUCTURAL VERIFICATION ===
-                setGenerationStatus("🏗️ Verificação Final: Auditando integridade estrutural do LaTeX...");
-                setGenerationProgress(90);
-                currentPaper = await verifyLatexStructure(currentPaper, generationModel);
-                // ====================================================
-
                 setFinalLatexCode(currentPaper);
                 setGenerationProgress(95);
                 let compiledFile: File | null = null;
-                const compilationUpdater = (message: string) => setGenerationStatus(`${message}`);
+                const compilationUpdater = (message: string) => setGenerationStatus(`Artigo ${i}/${articlesToProcess}: ${message}`);
                 const { pdfFile, finalCode } = await robustCompile(currentPaper, compilationUpdater);
                 compiledFile = pdfFile;
                 currentPaper = finalCode;
 
                 if (isGenerationCancelled.current) continue;
 
-                setGenerationStatus(`Publicando no Zenodo...`);
+                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Publicando no Zenodo...`);
                 setGenerationProgress(98);
                 const metadataForUpload = extractMetadata(currentPaper, true);
                 const keywordsForUpload = currentPaper.match(/\\keywords\{([^}]+)\}/)?.[1] || '';
                 let publishedResult: PublishedArticle | null = null;
+                
+                // Helper to wrap URL with proxy for Zenodo calls in automation loop
+                const proxied = (url: string) => `/zenodo-proxy?target=${encodeURIComponent(url)}`;
 
                 for (let attempt = 1; attempt <= 10; attempt++) {
                     if (isGenerationCancelled.current) break;
                     try {
                         const baseUrl = useSandbox ? 'https://sandbox.zenodo.org/api' : 'https://zenodo.org/api';
-                        
-                        // STEP 1: Create Deposition (Use zenodoFetch)
-                        const createResponse = await zenodoFetch(`${baseUrl}/deposit/depositions`, { 
-                            method: 'POST', 
-                            headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' }, 
-                            body: JSON.stringify({}) 
-                        });
-                        
-                        if (!createResponse.ok) {
-                            const errorText = await createResponse.text();
-                            let errorMsg = `Erro ${createResponse.status}: ${errorText}`;
-                            if(createResponse.status === 403) {
-                                errorMsg = `Erro 403 (FORBIDDEN): Token sem permissão ou incompatível com o ambiente (Sandbox/Prod).`;
-                            }
-                            throw new Error(errorMsg);
-                        }
+                        // Use proxy for creation
+                        const createResponse = await fetch(proxied(`${baseUrl}/deposit/depositions`), { method: 'POST', headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+                        if (!createResponse.ok) throw new Error(`Erro ${createResponse.status} ao criar depósito.`);
                         const deposit = await createResponse.json();
                         
-                        // STEP 2: Upload File (Use zenodoFetch with FormData)
-                        // IMPORTANT: We use zenodoFetch (proxy) so we do NOT set Content-Type header manually.
-                        // The browser sets multipart/form-data boundary automatically when body is FormData.
-                        const formData = new FormData();
-                        formData.append('file', compiledFile, 'paper.pdf');
-                        
-                        const uploadResponse = await zenodoFetch(`${baseUrl}/deposit/depositions/${deposit.id}/files`, { 
-                            method: 'POST', 
-                            headers: { 'Authorization': `Bearer ${storedToken}` }, 
-                            body: formData 
+                        const bucketUrl = deposit.links.bucket;
+                        if (!bucketUrl) throw new Error('Could not find bucket URL in Zenodo API response.');
+
+                        const uploadResponse = await fetch(proxied(`${bucketUrl}/paper.pdf`), {
+                            method: 'PUT',
+                            headers: {
+                                'Authorization': `Bearer ${storedToken}`,
+                                'Content-Type': 'application/octet-stream'
+                            },
+                            body: compiledFile
                         });
-                        
+
                         if (!uploadResponse.ok) {
                             const errorText = await uploadResponse.text();
-                            throw new Error(`Falha no upload do PDF (${uploadResponse.status}): ${errorText}`);
+                            throw new Error(`Falha no upload do PDF: ${uploadResponse.status} - ${errorText}`);
                         }
                         
-                        // STEP 3: Add Metadata (Use zenodoFetch)
                         const creators = authors.filter(a => a.name).map(author => ({
                             name: author.name,
                             orcid: author.orcid || undefined // Affiliation intentionally omitted for Zenodo
                         }));
 
                         const metadataPayload = { metadata: { title: metadataForUpload.title, upload_type: 'publication', publication_type: 'article', description: metadataForUpload.abstract, creators: creators, keywords: keywordsForUpload.split(',').map(k => k.trim()).filter(k => k) } };
-                        const metadataResponse = await zenodoFetch(`${baseUrl}/deposit/depositions/${deposit.id}`, { 
-                            method: 'PUT', 
-                            headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' }, 
-                            body: JSON.stringify(metadataPayload) 
-                        });
-                        
+                        // Use proxy for metadata update
+                        const metadataResponse = await fetch(proxied(`${baseUrl}/deposit/depositions/${deposit.id}`), { method: 'PUT', headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(metadataPayload) });
                         if (!metadataResponse.ok) throw new Error('Falha ao atualizar metadados');
-                        
-                        // STEP 4: Publish (Use zenodoFetch)
-                        const publishResponse = await zenodoFetch(`${baseUrl}/deposit/depositions/${deposit.id}/actions/publish`, { 
-                            method: 'POST', 
-                            headers: { 'Authorization': `Bearer ${storedToken}` } 
-                        });
-                        
+                        // Use proxy for publish
+                        const publishResponse = await fetch(proxied(`${baseUrl}/deposit/depositions/${deposit.id}/actions/publish`), { method: 'POST', headers: { 'Authorization': `Bearer ${storedToken}` } });
                         if (!publishResponse.ok) throw new Error('Falha ao publicar');
                         const published = await publishResponse.json();
                         publishedResult = { doi: published.doi, link: useSandbox ? `https://sandbox.zenodo.org/records/${deposit.id}` : `https://zenodo.org/records/${deposit.id}`, title: metadataForUpload.title, date: new Date().toISOString() };
@@ -502,7 +479,7 @@ const App: React.FC = () => {
                         const errorMessage = error instanceof Error ? error.message : `Tentativa ${attempt} falhou.`;
                         if (attempt === 10) throw new Error(`Falha ao enviar para o Zenodo após 10 tentativas. Erro final: ${errorMessage}`);
                         const delayTime = 15000 + (5000 * (attempt - 1));
-                        setGenerationStatus(`❌ ${errorMessage} Aguardando ${delayTime / 1000}s...`);
+                        setGenerationStatus(`Artigo ${i}/${articlesToProcess}: ❌ ${errorMessage} Aguardando ${delayTime / 1000}s...`);
                         await new Promise(resolve => setTimeout(resolve, delayTime));
                     }
                 }
@@ -514,15 +491,20 @@ const App: React.FC = () => {
                 }
 
             } catch (error) {
-                const errorMessage = error instanceof Error ? error.message : `Ocorreu um erro desconhecido.`;
-                console.error(`Error processing article:`, error);
+                const errorMessage = error instanceof Error ? error.message : `Ocorreu um erro desconhecido no artigo ${i}.`;
+                console.error(`Error processing article ${i}:`, error);
 
-                // Critical Error Handling: Stop automation on quota errors.
-                if (errorMessage.toLowerCase().includes('quota')) {
-                    setGenerationStatus(`🛑 Limite de cota da API atingido. Pausando.`);
-                    setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: 'upload_failed', latexCode: currentPaper, errorMessage: `Pausado por limite de cota: ${errorMessage}` }]);
-                    isGenerationCancelled.current = true; // Use this flag to signal a hard stop
-                    break; // Exit the loop immediately.
+                // Critical Error Handling: Stop automation on quota errors OR when rotation loop exhausted.
+                const lowerMsg = errorMessage.toLowerCase();
+                if (
+                    lowerMsg.includes('quota') || 
+                    lowerMsg.includes('exhausted') || 
+                    lowerMsg.includes('rotation loop')
+                ) {
+                    setGenerationStatus(`🛑 Limite de cota atingido em TODAS as chaves de API. A automação será pausada.`);
+                    setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: 'upload_failed', latexCode: currentPaper, errorMessage: `Pausado por limite de cota global: ${errorMessage}` }]);
+                    isGenerationCancelled.current = true; 
+                    break;
                 }
 
                 // Resilient Handling for other errors
@@ -530,18 +512,27 @@ const App: React.FC = () => {
                 setArticleEntries(prev => [...prev, { id: articleEntryId, title: temporaryTitle, date: new Date().toISOString(), status: status, latexCode: currentPaper, errorMessage: errorMessage }]);
                 
                 let pauseDuration = 3000;
-                if (errorMessage.toLowerCase().includes('network') || errorMessage.toLowerCase().includes('fetch')) {
+                if (lowerMsg.includes('network') || lowerMsg.includes('fetch')) {
                     setGenerationStatus(`🔌 Problema de rede detectado. Pausando por 1 minuto...`);
                     pauseDuration = 60000;
                 } else {
-                     setGenerationStatus(`❌ Erro: ${errorMessage}. Reiniciando em 3s...`);
+                     setGenerationStatus(`❌ Erro no artigo ${i}: ${errorMessage}. Continuando para o próximo em 3s...`);
                 }
                 await new Promise(resolve => setTimeout(resolve, pauseDuration));
                 continue; // Continue to the next article in the loop for non-quota errors
             }
+            
+            // After processing an article, introduce a cooldown before starting the next one
+            // in a manual batch to prevent hitting API rate limits.
+            // This does not apply to the very last article in the batch or to continuous mode.
+            if (!isContinuousMode && i < articlesToProcess && !isGenerationCancelled.current) {
+                const cooldownSeconds = 60; // 60 seconds to safely reset per-minute quota
+                setGenerationStatus(`Artigo ${i}/${articlesToProcess} concluído. Pausando por ${cooldownSeconds}s para evitar limites de taxa...`);
+                await new Promise(resolve => setTimeout(resolve, cooldownSeconds * 1000));
+            }
         } // end for loop
 
-        setIsGenerating(false); // Stop generation state temporarily or permanently
+        setIsGenerating(false); // Stop generation state regardless of how the loop ended.
 
         if (isGenerationCancelled.current) {
             // Check if the stop was due to quota or manual cancellation
@@ -552,17 +543,19 @@ const App: React.FC = () => {
                 return "❌ Automação cancelada pelo usuário."; // Default manual cancellation message
             });
         } else if (isContinuousMode) {
-            setGenerationStatus(`✅ Artigo concluído com sucesso. Aguardando 1 minuto para iniciar o próximo...`);
+            setGenerationStatus(`✅ Ciclo concluído. Pausa de 1 minuto antes do próximo artigo (Modo Contínuo)...`);
             setTimeout(() => {
                 // Double-check flags before re-starting
                 if (isContinuousMode && !isGenerationCancelled.current) {
-                    handleFullAutomation();
+                    // Start next cycle with just 1 article to keep cooldowns active
+                    // This STRICTLY ensures "GERAR APENAS UM ARTIGO POR VEZ" is followed in the recursion
+                    handleFullAutomation(1);
                 }
-            }, 60000); // 1 MINUTE DELAY
+            }, 60000); // STRICTLY 60 seconds (1 minute) pause
         } else {
             // This is for a normal, single batch completion
             setGenerationProgress(100);
-            setGenerationStatus(`✅ Processo concluído! Artigo gerado e publicado.`);
+            setGenerationStatus(`✅ Processo concluído! ${articlesToProcess} artigos processados.`);
             setStep(4);
         }
     };
@@ -595,6 +588,9 @@ const App: React.FC = () => {
             setIsRepublishingId(null);
             return;
         }
+        
+        // Helper to wrap URL with proxy for republishing
+        const proxied = (url: string) => `/zenodo-proxy?target=${encodeURIComponent(url)}`;
     
         try {
             setUploadStatus(<div className="status-message status-info">⏳ Iniciando republicação para "{articleToRepublish.title}"...</div>);
@@ -630,33 +626,27 @@ const App: React.FC = () => {
                 try {
                     const baseUrl = useSandbox ? 'https://sandbox.zenodo.org/api' : 'https://zenodo.org/api';
                     
-                    // Use zenodoFetch proxy for all calls
-                    const createResponse = await zenodoFetch(`${baseUrl}/deposit/depositions`, {
+                    const createResponse = await fetch(proxied(`${baseUrl}/deposit/depositions`), {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' },
                         body: JSON.stringify({})
                     });
-                    if (!createResponse.ok) {
-                        const errorText = await createResponse.text();
-                        let errorMsg = `Erro ${createResponse.status}: Falha ao criar depósito. ${errorText}`;
-                        if(createResponse.status === 403) {
-                            errorMsg = `Erro 403 (FORBIDDEN): Token inválido ou ambiente incorreto (Sandbox/Prod).`;
-                        }
-                        throw new Error(errorMsg);
-                    }
+                    if (!createResponse.ok) throw new Error(`Erro ${createResponse.status}: Falha ao criar depósito.`);
                     const deposit = await createResponse.json();
     
-                    const formData = new FormData();
-                    formData.append('file', compiledFile, 'paper.pdf');
-                    
-                    const uploadResponse = await zenodoFetch(`${baseUrl}/deposit/depositions/${deposit.id}/files`, {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${storedToken}` }, // Browser handles multipart headers
-                        body: formData
+                    const bucketUrl = deposit.links.bucket;
+                    if (!bucketUrl) throw new Error('Could not find bucket URL in Zenodo API response.');
+                    const uploadResponse = await fetch(proxied(`${bucketUrl}/paper.pdf`), {
+                        method: 'PUT',
+                        headers: {
+                            'Authorization': `Bearer ${storedToken}`,
+                            'Content-Type': 'application/octet-stream',
+                        },
+                        body: compiledFile
                     });
                     if (!uploadResponse.ok) {
                         const errorText = await uploadResponse.text();
-                        throw new Error(`Falha no upload do PDF (${uploadResponse.status}): ${errorText}`);
+                        throw new Error(`Falha no upload do PDF: ${uploadResponse.status} - ${errorText}`);
                     }
     
                     const keywordsArray = keywordsForUpload.split(',').map(k => k.trim()).filter(k => k);
@@ -675,14 +665,14 @@ const App: React.FC = () => {
                             keywords: keywordsArray.length > 0 ? keywordsArray : undefined
                         }
                     };
-                    const metadataResponse = await zenodoFetch(`${baseUrl}/deposit/depositions/${deposit.id}`, {
+                    const metadataResponse = await fetch(proxied(`${baseUrl}/deposit/depositions/${deposit.id}`), {
                         method: 'PUT',
                         headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' },
                         body: JSON.stringify(metadataPayload)
                     });
                     if (!metadataResponse.ok) throw new Error('Falha ao atualizar metadados');
     
-                    const publishResponse = await zenodoFetch(`${baseUrl}/deposit/depositions/${deposit.id}/actions/publish`, {
+                    const publishResponse = await fetch(proxied(`${baseUrl}/deposit/depositions/${deposit.id}/actions/publish`), {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${storedToken}` }
                     });
@@ -744,11 +734,41 @@ const App: React.FC = () => {
     }
     
     const extractMetadata = (code: string, returnData = false) => {
-        const titleMatch = code.match(/\\title\{([^}]+)\}/);
-        const title = titleMatch ? titleMatch[1].replace(/\\/g, '') : 'Untitled Paper';
+        // Use greedy matching (.*) to capture title even if it contains nested braces on the same line.
+        const titleMatch = code.match(/\\title\{(.*)\}/);
+        
+        // Robust cleaning function for LaTeX strings
+        const cleanLatexString = (str: string) => {
+            if (!str) return '';
+            let s = str;
+            // 1. Remove standard formatting commands with backslash
+            // Recursively remove common formatting commands: \textit{word} -> word, \textbf{word} -> word
+            for(let i=0; i<3; i++) {
+                s = s.replace(/\\(textit|textbf|emph|textsc|textsf|text|underline)\{([^}]+)\}/g, '$2');
+            }
+            
+            // 2. Extra Robustness: Remove formatting commands WITHOUT backslash
+            // This handles cases where '\' might have been stripped prematurely or input was malformed (e.g. textit{Word})
+            s = s.replace(/(textit|textbf|emph|textsc|textsf|text|underline)\{([^}]+)\}/g, '$2');
+
+            // 3. Remove escaped characters: \& -> &, \% -> %, \$ -> $
+            s = s.replace(/\\([&%$#_{}])/g, '$1');
+
+            // 4. Remove remaining braces if they are just grouping { }
+            s = s.replace(/\\{([^}]+)\\}/g, '$1'); // Fixed Regex for brace removal
+
+            // 5. Finally remove remaining backslashes (like in \'e -> 'e)
+            s = s.replace(/\\/g, ''); 
+            
+            return s.trim();
+        };
+
+        const title = titleMatch ? cleanLatexString(titleMatch[1]) : 'Untitled Paper';
         
         const abstractMatch = code.match(/\\begin\{abstract\}([\s\S]*?)\\end\{abstract\}/);
-        const abstractText = abstractMatch ? abstractMatch[1].trim().replace(/\\noindent\s*/g, '').replace(/\\/g, '') : '';
+        let abstractText = abstractMatch ? abstractMatch[1] : '';
+        abstractText = abstractText.replace(/\\noindent\s*/g, '');
+        abstractText = cleanLatexString(abstractText);
         
         // Use dynamic author details for metadata extraction
         // The `authors` state already holds the necessary ZenodoAuthor[] structure
@@ -897,6 +917,9 @@ const App: React.FC = () => {
     const handleToggleContinuousMode = () => {
         const newStatus = !isContinuousMode;
         setIsContinuousMode(newStatus);
+        if (newStatus) {
+            setNumberOfArticles(1); // Force 1 to avoid "7 Artigos" text confusion
+        }
         localStorage.setItem('isContinuousMode', String(newStatus));
         if (!newStatus) isGenerationCancelled.current = true;
     };
@@ -943,7 +966,22 @@ const App: React.FC = () => {
     
     return (
         <div className="container">
-            <ApiKeyModal isOpen={isApiModalOpen} onClose={() => setIsApiModalOpen(false)} onSave={(keys) => { if (keys.gemini) localStorage.setItem('gemini_api_key', keys.gemini); if (keys.zenodo) setZenodoToken(keys.zenodo); if (keys.xai) localStorage.setItem('xai_api_key', keys.xai); setIsApiModalOpen(false); }} />
+            <ApiKeyModal 
+                isOpen={isApiModalOpen} 
+                onClose={() => setIsApiModalOpen(false)} 
+                onSave={(keys) => { 
+                    // Save Gemini Keys (Array)
+                    localStorage.setItem('gemini_api_keys', JSON.stringify(keys.gemini));
+                    // Save the first key as default for backward compatibility or simple usage
+                    if (keys.gemini.length > 0) {
+                        localStorage.setItem('gemini_api_key', keys.gemini[0]);
+                    }
+
+                    if (keys.zenodo) setZenodoToken(keys.zenodo); 
+                    if (keys.xai) localStorage.setItem('xai_api_key', keys.xai); 
+                    setIsApiModalOpen(false); 
+                }} 
+            />
             <PersonalDataModal
                 isOpen={isPersonalDataModalOpen}
                 onClose={() => setIsPersonalDataModalOpen(false)}
@@ -983,7 +1021,7 @@ const App: React.FC = () => {
                                 <LanguageSelector languages={LANGUAGES} selectedLanguage={language} onSelect={setLanguage} />
                                 <ModelSelector models={AVAILABLE_MODELS} selectedModel={analysisModel} onSelect={setAnalysisModel} label="Modelo Rápido (para análise e título):" />
                                 <ModelSelector models={AVAILABLE_MODELS} selectedModel={generationModel} onSelect={setGenerationModel} label="Modelo Poderoso (para geração e melhoria):" />
-                                <PageSelector options={[12, 30, 60, 100]} selectedPageCount={pageCount} onSelect={setPageCount} />
+                                <PageSelector options={[12]} selectedPageCount={pageCount} onSelect={setPageCount} />
                                 <div>
                                     <label htmlFor="discipline-select" className="font-semibold block mb-2">Disciplina para Geração de Título:</label>
                                     <select
@@ -1000,9 +1038,20 @@ const App: React.FC = () => {
                                         ))}
                                     </select>
                                 </div>
+                                <div>
+                                    <label className="font-semibold block mb-2">Número de Artigos a Gerar (Manual):</label>
+                                    <input type="number" min="1" max="100" value={numberOfArticles} onChange={(e) => setNumberOfArticles(Math.max(1, Number(e.target.value)))} className="w-full" disabled={isContinuousMode || isSchedulerEnabled} />
+                                </div>
                             </div>
                             <div className="mt-6 text-center">
-                                <ActionButton onClick={() => handleFullAutomation()} disabled={isGenerating} isLoading={isGenerating} text={isContinuousMode ? "Iniciar Ciclo Contínuo (Infinito)" : "Gerar 1 Artigo"} loadingText="Em Progresso..." completed={isGenerationComplete} />
+                                <ActionButton 
+                                    onClick={() => handleFullAutomation()} 
+                                    disabled={isGenerating} 
+                                    isLoading={isGenerating} 
+                                    text={isContinuousMode ? "Iniciar Automação Contínua (1 por vez)" : `Iniciar Automação (${numberOfArticles} Artigo${numberOfArticles > 1 ? 's' : ''})`}
+                                    loadingText="Em Progresso..." 
+                                    completed={isGenerationComplete} 
+                                />
                                 {isGenerating && (<button onClick={() => { isGenerationCancelled.current = true; setGenerationStatus("🔄 Cancelando após o artigo atual..."); }} className="btn bg-red-600 text-white hover:bg-red-700 mt-4">Cancelar Automação</button>)}
                             </div>
                             
@@ -1010,12 +1059,12 @@ const App: React.FC = () => {
                                 <div>
                                     <h4 className="font-semibold text-center mb-2 text-gray-700">Automação Contínua (Loop)</h4>
                                     <div className="flex items-center justify-center gap-2"><span className={`font-semibold transition-colors ${!isContinuousMode ? 'text-indigo-600' : 'text-gray-500'}`}>Off</span><label htmlFor="continuousToggle" className="relative inline-flex items-center cursor-pointer"><input type="checkbox" checked={isContinuousMode} onChange={handleToggleContinuousMode} id="continuousToggle" className="sr-only peer" /><div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div></label><span className={`font-semibold transition-colors ${isContinuousMode ? 'text-indigo-600' : 'text-gray-500'}`}>On</span></div>
-                                    <p className="text-center text-xs text-gray-500 mt-1">Gera 1 artigo, aguarda 1 min, e repete.</p>
+                                    <p className="text-center text-xs text-gray-500 mt-1">Gera um artigo por vez continuamente, com <strong>pausas de 1 minuto</strong>.</p>
                                 </div>
                                  <div>
                                     <h4 className="font-semibold text-center mb-2 text-gray-700">Agendamento Automático</h4>
                                     <div className="flex items-center justify-center gap-2"><span className={`font-semibold transition-colors ${!isSchedulerEnabled ? 'text-indigo-600' : 'text-gray-500'}`}>Off</span><label htmlFor="schedulerToggle" className="relative inline-flex items-center cursor-pointer"><input type="checkbox" checked={isSchedulerEnabled} onChange={handleToggleScheduler} id="schedulerToggle" className="sr-only peer" /><div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div></label><span className={`font-semibold transition-colors ${isSchedulerEnabled ? 'text-indigo-600' : 'text-gray-500'}`}>On</span></div>
-                                    <p className="text-center text-xs text-gray-500 mt-1">Inicia automação às 05h e 12h.</p>
+                                    <p className="text-center text-xs text-gray-500 mt-1">Inicia lotes às 05h e 12h.</p>
                                 </div>
                             </div>
 
