@@ -358,12 +358,14 @@ function postProcessLatex(latexCode: string): string {
 
     // 1. ROBUSTLY STRIP IMAGES (Fix for "File not found" errors)
     // AI often hallucinates \includegraphics despite instructions. We must surgically remove them.
-    // Removes \begin{figure}...\end{figure} blocks
-    code = code.replace(/\\begin\{figure\}([\s\S]*?)\\end\{figure\}/g, '');
-    // Removes \includegraphics[...]{...} and \includegraphics{...}
-    code = code.replace(/\\includegraphics(\[.*?\])?\{.*?\}/g, '');
-    // Removes \captionof{figure}{...} if present
-    code = code.replace(/\\captionof\{figure\}\{.*?\}/g, '');
+    // Removes \begin{figure}...\end{figure} and \begin{figure*}...\end{figure*} blocks
+    code = code.replace(/\\begin\{figure\*?\}([\s\S]*?)\\end\{figure\*?\}/g, '');
+    
+    // Removes \includegraphics[...]{...} and \includegraphics{...} with potential whitespace
+    code = code.replace(/\\includegraphics\s*(\[.*?\])?\s*\{.*?\}/g, '');
+    
+    // Removes \captionof{figure}{...} if present, tolerant to spaces
+    code = code.replace(/\\captionof\s*\{figure\}\s*\{.*?\}/g, '');
 
     // 2. Fix Authors Ampersand
     code = code.replace(/,?\s+&\s+/g, ' and ');
@@ -375,7 +377,6 @@ function postProcessLatex(latexCode: string): string {
     // If the AI output is truncated, lists might be left open. We check and close them.
     // We only check for the most common ones: itemize, enumerate, description.
     
-    // Simple heuristic: If count(begin) > count(end), append end before document end.
     const environments = ['itemize', 'enumerate', 'description'];
     
     environments.forEach(env => {
@@ -386,12 +387,12 @@ function postProcessLatex(latexCode: string): string {
         
         if (openCount > closeCount) {
             const diff = openCount - closeCount;
-            // Append missing end tags before \end{document}
             const closingTags = `\\end{${env}}`.repeat(diff);
-            // Replace the last occurrence of \end{document} with closingTags + \end{document}
-            // If \end{document} is missing (severe truncation), we append it at the very end.
-            if (code.includes('\\end{document}')) {
-                code = code.replace('\\end{document}', `\n${closingTags}\n\\end{document}`);
+            
+            // Append missing end tags before \end{document} or at end of string
+            const docEndIdx = code.lastIndexOf('\\end{document}');
+            if (docEndIdx !== -1) {
+                code = code.substring(0, docEndIdx) + `\n${closingTags}\n` + code.substring(docEndIdx);
             } else {
                 code += `\n${closingTags}`;
             }
@@ -403,7 +404,33 @@ function postProcessLatex(latexCode: string): string {
         code += '\n\\end{document}';
     }
 
+    // 6. Ensure Clean Start (Remove AI chatter before \documentclass)
+    const docClassIdx = code.indexOf('\\documentclass');
+    if (docClassIdx > 0) {
+        code = code.substring(docClassIdx);
+    }
+
     return code;
+}
+
+// Helper to robustly extract LaTeX code from AI response
+function extractLatexFromResponse(text: string): string {
+    if (!text) return '';
+    
+    // First, try to capture content inside ```latex ... ``` blocks
+    const match = text.match(/```latex\s*([\s\S]*?)\s*```/);
+    if (match && match[1]) {
+        return match[1].trim();
+    }
+    
+    // Fallback: strip markdown delimiters if they are just at start/end
+    let cleaned = text.trim();
+    if (cleaned.startsWith('```latex')) cleaned = cleaned.substring(8);
+    else if (cleaned.startsWith('```')) cleaned = cleaned.substring(3);
+    
+    if (cleaned.endsWith('```')) cleaned = cleaned.substring(0, cleaned.length - 3);
+    
+    return cleaned.trim();
 }
 
 /**
@@ -588,7 +615,7 @@ ${templateWithBabelAndAuthor}
         throw new Error(`AI returned an empty text response. Finish Reason: ${reason}. Safety Ratings: [${safetyRatings}].`);
     }
 
-    let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
+    let paper = extractLatexFromResponse(response.text);
     
     // Ensure the paper ends with \end{document}
     if (!paper.includes('\\end{document}')) {
@@ -814,7 +841,7 @@ Task: Return the COMPLETE, IMPROVED body starting with \\begin{document}.`;
         throw new Error("AI returned an empty response for the improvement step.");
     }
 
-    let improvedBody = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
+    let improvedBody = extractLatexFromResponse(response.text);
 
     // STITCHING: If we successfully split, we must re-attach the preamble.
     // We check if the AI followed instructions and returned only the body (starts with \begin{document} or similar)
@@ -865,7 +892,7 @@ ${paperContent}
         throw new Error("AI returned an empty response for the fix step.");
     }
     
-    let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
+    let paper = extractLatexFromResponse(response.text);
     
     // Ensure the paper ends with \end{document}
     if (!paper.includes('\\end{document}')) {
@@ -906,7 +933,7 @@ export async function reformatPaperWithStyleGuide(paperContent: string, styleGui
         throw new Error("AI returned an empty response for the reformat step.");
     }
 
-    let paper = response.text.trim().replace(/^```latex\s*|```\s*$/g, '');
+    let paper = extractLatexFromResponse(response.text);
 
     // Ensure the paper ends with \end{document}
     if (!paper.includes('\\end{document}')) {
