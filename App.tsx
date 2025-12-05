@@ -45,8 +45,8 @@ const App: React.FC = () => {
     const [language, setLanguage] = useState<Language>('en');
     const [generationModel, setGenerationModel] = useState('gemini-2.5-flash');
     const [analysisModel, setAnalysisModel] = useState('gemini-2.5-flash');
-    // REMOVIDAS AS OPÇÕES DE 30, 60, 100 PAGINAS. PADRÃO FIXO EM 12.
-    const [pageCount, setPageCount] = useState(12);
+    // REMOVIDAS AS OPÇÕES DE 30, 60, 100 PAGINAS. PADRÃO FIXO EM 10.
+    const [pageCount, setPageCount] = useState(10);
     const [isGenerating, setIsGenerating] = useState(false);
     const [generationProgress, setGenerationProgress] = useState(0);
     const [generationStatus, setGenerationStatus] = useState('');
@@ -1021,7 +1021,7 @@ const App: React.FC = () => {
                                 <LanguageSelector languages={LANGUAGES} selectedLanguage={language} onSelect={setLanguage} />
                                 <ModelSelector models={AVAILABLE_MODELS} selectedModel={analysisModel} onSelect={setAnalysisModel} label="Modelo Rápido (para análise e título):" />
                                 <ModelSelector models={AVAILABLE_MODELS} selectedModel={generationModel} onSelect={setGenerationModel} label="Modelo Poderoso (para geração e melhoria):" />
-                                <PageSelector options={[12]} selectedPageCount={pageCount} onSelect={setPageCount} />
+                                <PageSelector options={[10]} selectedPageCount={pageCount} onSelect={setPageCount} />
                                 <div>
                                     <label htmlFor="discipline-select" className="font-semibold block mb-2">Disciplina para Geração de Título:</label>
                                     <select

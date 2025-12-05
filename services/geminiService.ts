@@ -354,20 +354,54 @@ export async function generatePaperTitle(topic: string, language: Language, mode
 
 // Programmatic post-processing to fix common LaTeX issues
 function postProcessLatex(latexCode: string): string {
-    // Robustly replace ampersands used for authors in bibliographies
-    let code = latexCode.replace(/,?\s+&\s+/g, ' and ');
+    let code = latexCode;
+
+    // 1. ROBUSTLY STRIP IMAGES (Fix for "File not found" errors)
+    // AI often hallucinates \includegraphics despite instructions. We must surgically remove them.
+    // Removes \begin{figure}...\end{figure} blocks
+    code = code.replace(/\\begin\{figure\}([\s\S]*?)\\end\{figure\}/g, '');
+    // Removes \includegraphics[...]{...} and \includegraphics{...}
+    code = code.replace(/\\includegraphics(\[.*?\])?\{.*?\}/g, '');
+    // Removes \captionof{figure}{...} if present
+    code = code.replace(/\\captionof\{figure\}\{.*?\}/g, '');
+
+    // 2. Fix Authors Ampersand
+    code = code.replace(/,?\s+&\s+/g, ' and ');
     
-    // CRITICAL: Strip CJK (Chinese, Japanese, Korean) characters
-    // The default pdflatex compiler does not support these characters and will crash.
-    // We remove them to ensure the paper compiles.
-    // Ranges:
-    // \u4e00-\u9fff (Common CJK)
-    // \u3400-\u4dbf (Extension A)
-    // \uf900-\ufaff (Compatibility)
-    // \u3040-\u309f (Hiragana)
-    // \u30a0-\u30ff (Katakana)
-    // \uac00-\ud7af (Hangul)
+    // 3. Strip CJK characters (Compilation Fix)
     code = code.replace(/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g, '');
+
+    // 4. AUTO-CLOSE ENVIRONMENTS (Fix for "\begin{itemize} ended by \end{document}")
+    // If the AI output is truncated, lists might be left open. We check and close them.
+    // We only check for the most common ones: itemize, enumerate, description.
+    
+    // Simple heuristic: If count(begin) > count(end), append end before document end.
+    const environments = ['itemize', 'enumerate', 'description'];
+    
+    environments.forEach(env => {
+        const beginRegex = new RegExp(`\\\\begin\\{${env}\\}`, 'g');
+        const endRegex = new RegExp(`\\\\end\\{${env}\\}`, 'g');
+        const openCount = (code.match(beginRegex) || []).length;
+        const closeCount = (code.match(endRegex) || []).length;
+        
+        if (openCount > closeCount) {
+            const diff = openCount - closeCount;
+            // Append missing end tags before \end{document}
+            const closingTags = `\\end{${env}}`.repeat(diff);
+            // Replace the last occurrence of \end{document} with closingTags + \end{document}
+            // If \end{document} is missing (severe truncation), we append it at the very end.
+            if (code.includes('\\end{document}')) {
+                code = code.replace('\\end{document}', `\n${closingTags}\n\\end{document}`);
+            } else {
+                code += `\n${closingTags}`;
+            }
+        }
+    });
+
+    // 5. Ensure Document Ends
+    if (!code.includes('\\end{document}')) {
+        code += '\n\\end{document}';
+    }
 
     return code;
 }
@@ -507,6 +541,7 @@ export async function generateInitialPaper(title: string, language: Language, pa
 4.  **Format:** Return valid LaTeX. NO ampersands (&) in text (use 'and'). NO CJK characters. Escape special chars (%, _, $).
 5.  **Structure:** Do NOT change commands. PRESERVE \\author/\\date verbatim.
 6.  **Content:** Generate detailed content for each section to meet ~${pageCount} pages.
+7.  **CRITICAL - NO IMAGES:** Do NOT use \\includegraphics, \\begin{figure}, or \\caption. Text only.
 `;
 
     // Dynamically insert the babel package and reference placeholders into the template for the prompt
@@ -735,7 +770,7 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
     3.  **Language:** **${languageName}**.
     4.  **Formatting:** NO \\bibitem. NO URLs. Use 'and' instead of '&'. NO CJK chars.
     5.  **Placeholders:** Fill any remaining placeholders like [INSERT NEW CONTENT...].
-    6.  **Safety:** Do not add \\newpage. Do not add images.
+    6.  **Safety:** Do not add \\newpage. NO IMAGES (\\includegraphics).
     `;
 
     // Strip comments to reduce input token usage, AI will rewrite content anyway
@@ -808,8 +843,8 @@ export async function fixLatexPaper(paperContent: string, compilationError: stri
     3.  **Specific Fixes:**
         -   Error "&": Replace with 'and'.
         -   Error "Unicode": Remove CJK chars (Chinese/Japanese).
-        -   Error "Preamble": Simplify metadata if broken. Preserve \\author block.
-    4.  **Prohibited:** NO \\bibitem, NO \\cite, NO URLs.
+        -   Error "File not found": REMOVE \\includegraphics.
+    4.  **Prohibited:** NO \\bibitem, NO \\cite, NO URLs, NO IMAGES.
     `;
 
     const userPrompt = `Error:
