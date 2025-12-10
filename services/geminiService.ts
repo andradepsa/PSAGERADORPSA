@@ -942,3 +942,14 @@ export async function reformatPaperWithStyleGuide(paperContent: string, styleGui
 
     return postProcessLatex(paper);
 }
+
+
+
+
+
+
+
+
+
+
+
