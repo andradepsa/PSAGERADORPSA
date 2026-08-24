@@ -295,12 +295,16 @@ async function callModel(
         ];
 
         const apiCall = async () => {
+            const safeReferer = (typeof window !== 'undefined' && window.location && window.location.origin && window.location.origin !== 'null') 
+                ? window.location.origin 
+                : 'https://ai.studio';
+
             const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${apiKey}`,
-                    'HTTP-Referer': window.location.origin,
+                    'HTTP-Referer': safeReferer,
                     'X-Title': 'Scientific Paper Generator'
                 },
                 body: JSON.stringify({
@@ -312,8 +316,17 @@ async function callModel(
             });
 
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(`OpenRouter API Error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`);
+                let errorMsg = `OpenRouter API Error: ${response.status}`;
+                try {
+                    const errorData = await response.json();
+                    errorMsg += ` - ${errorData.error?.message || 'Unknown error'}`;
+                } catch (_) {
+                    try {
+                        const errorText = await response.text();
+                        errorMsg += ` - ${errorText.substring(0, 150)}`;
+                    } catch (__) {}
+                }
+                throw new Error(errorMsg);
             }
 
             const data = await response.json();
