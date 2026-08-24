@@ -979,6 +979,7 @@ const App: React.FC = () => {
 
                     if (keys.zenodo) setZenodoToken(keys.zenodo); 
                     if (keys.xai) localStorage.setItem('xai_api_key', keys.xai); 
+                    if (keys.openrouter) localStorage.setItem('openrouter_api_key', keys.openrouter);
                     setIsApiModalOpen(false); 
                 }} 
             />

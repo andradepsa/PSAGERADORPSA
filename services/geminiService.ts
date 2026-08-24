@@ -289,6 +289,59 @@ async function callModel(
         };
 
         return withRateLimitHandling(apiCall);
+    } else if (model === 'stealth/ox-alpha') {
+        const apiKey = localStorage.getItem('openrouter_api_key');
+        if (!apiKey) {
+            throw new Error("OpenRouter API key not found. Please set it in the settings modal (gear icon).");
+        }
+
+        const messages = [
+            { role: 'system', content: systemInstruction },
+            { role: 'user', content: userPrompt }
+        ];
+
+        const apiCall = async () => {
+            const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`,
+                    'HTTP-Referer': window.location.origin,
+                    'X-Title': 'Scientific Paper Generator'
+                },
+                body: JSON.stringify({
+                    model: model,
+                    messages: messages,
+                    stream: false,
+                    temperature: 0,
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(`OpenRouter API Error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`);
+            }
+
+            const data = await response.json();
+            const text = data.choices?.[0]?.message?.content || '';
+            
+            const reconstructedResponse = {
+                candidates: [{
+                    content: { parts: [{ text: text }], role: 'model' },
+                    finishReason: 'STOP',
+                    index: 0,
+                    safetyRatings: [],
+                    groundingMetadata: { groundingChunks: [] }
+                }],
+                functionCalls: [],
+                get text() {
+                    return this.candidates?.[0]?.content?.parts?.map(p => p.text).join('') || '';
+                }
+            };
+            return reconstructedResponse as GenerateContentResponse;
+        };
+
+        return withRateLimitHandling(apiCall);
     } else {
         throw new Error(`Unsupported model: ${model}`);
     }

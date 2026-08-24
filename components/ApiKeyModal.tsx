@@ -3,13 +3,14 @@ import React, { useState, useEffect } from 'react';
 interface ApiKeyModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onSave: (keys: { gemini: string[], zenodo: string, xai: string }) => void;
+    onSave: (keys: { gemini: string[], zenodo: string, xai: string, openrouter: string }) => void;
 }
 
 const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave }) => {
     const [geminiKey, setGeminiKey] = useState('');
     const [zenodoKey, setZenodoKey] = useState('');
     const [xaiKey, setXaiKey] = useState('');
+    const [openrouterKey, setOpenrouterKey] = useState('');
 
     useEffect(() => {
         if (isOpen) {
@@ -34,6 +35,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave }) =>
 
             setZenodoKey(localStorage.getItem('zenodo_api_key') || '');
             setXaiKey(localStorage.getItem('xai_api_key') || '');
+            setOpenrouterKey(localStorage.getItem('openrouter_api_key') || '');
         }
     }, [isOpen]);
 
@@ -45,7 +47,8 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave }) =>
         onSave({ 
             gemini: keyToSave ? [keyToSave] : [], 
             zenodo: zenodoKey, 
-            xai: xaiKey 
+            xai: xaiKey,
+            openrouter: openrouterKey
         });
     };
 
@@ -88,6 +91,20 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, onSave }) =>
                             value={xaiKey}
                             onChange={(e) => setXaiKey(e.target.value)}
                             placeholder="Cole sua x.ai API Key aqui"
+                            className="block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                    </div>
+
+                    <div className="border-t pt-4">
+                        <label htmlFor="openrouter-key" className="block text-sm font-medium text-gray-700 mb-1">
+                           🌐 OpenRouter API Key
+                        </label>
+                        <input
+                            id="openrouter-key"
+                            type="password"
+                            value={openrouterKey}
+                            onChange={(e) => setOpenrouterKey(e.target.value)}
+                            placeholder="Cole sua OpenRouter API Key aqui"
                             className="block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
                         />
                     </div>

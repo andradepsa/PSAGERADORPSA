@@ -13,7 +13,8 @@ export const AVAILABLE_MODELS: {name: string, description: string}[] = [
     { name: 'gemini-3.1-pro-preview', description: 'Google: Modelo de última geração para raciocínio avançado.' },
     { name: 'gemini-flash-latest', description: 'Google: Modelo padrão estável e balanceado para automações.' },
     { name: 'gemini-3.1-flash-lite', description: 'Google: Leve e ultra-rápido para tarefas de alto volume.' },
-    { name: 'grok-4-latest', description: 'x.ai: Modelo avançado de linguagem da x.ai.' }
+    { name: 'grok-4-latest', description: 'x.ai: Modelo avançado de linguagem da x.ai.' },
+    { name: 'stealth/ox-alpha', description: 'OpenRouter: Ox Alpha (Super modelo com contexto de 1M tokens).' }
 ];
 
 export const STYLE_GUIDES: StyleGuideOption[] = [
