@@ -129,7 +129,7 @@ async function executeWithKeyRotation<T>(
 }
 
 async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
-    const MAX_RETRIES = 5; 
+    const MAX_RETRIES = 3; 
     
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
@@ -142,29 +142,23 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
             }
 
             const shouldRotate = isRotationTrigger(error);
-            const hasBackupKeys = KeyManager.keys.length > 1;
 
-            if (shouldRotate && hasBackupKeys) {
+            if (shouldRotate) {
+                // Fail-fast on quota exhausted/permission/suspended key errors.
+                // This lets executeWithKeyRotation rotate keys instantly,
+                // or lets callModel trigger the next model fallback instantly!
                 throw error;
             }
 
             if (attempt === MAX_RETRIES) {
-                if (shouldRotate) {
-                    throw new Error(`Quota Exceeded or Key Suspended: ${errorMessage}`);
-                 }
                  if (errorMessage.includes('503') || errorMessage.includes('overloaded')) {
                     throw new Error("The AI model is temporarily overloaded. Please try again in a few moments.");
                  }
                 throw error;
             }
 
-            let backoffTime;
-            if (shouldRotate) {
-                backoffTime = 8000 + Math.random() * 4000;
-            } else {
-                console.log("Transient error detected. Using exponential backoff...");
-                backoffTime = Math.pow(2, attempt) * 1000 + Math.random() * 500;
-            }
+            console.log("Transient error detected. Using exponential backoff...");
+            const backoffTime = Math.min(4000, Math.pow(2, attempt) * 1000 + Math.random() * 500);
             
             console.log(`Waiting for ${backoffTime.toFixed(0)}ms before retrying on same key...`);
             await delay(backoffTime);

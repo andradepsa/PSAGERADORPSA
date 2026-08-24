@@ -125,17 +125,23 @@ const App: React.FC = () => {
         return localStorage.getItem('isSchedulerEnabled') === 'true';
     });
     const schedulerTimeoutRef = useRef<number | null>(null);
+    const progressIntervalRef = useRef<number | null>(null);
     const uploaderRef = useRef<ZenodoUploaderRef>(null);
 
     // == STEP 4: PUBLISHED ARTICLES STATE ==
     const [filter, setFilter] = useState({ day: '', month: '', year: '' });
     const [isRepublishingId, setIsRepublishingId] = useState<string | null>(null); // New state for republishing specific item
     
-    // Effect for pdf.js worker
+    // Effect for pdf.js worker and overall cleanup
     useEffect(() => {
         if (typeof pdfjsLib !== 'undefined') {
             pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         }
+        return () => {
+            if (progressIntervalRef.current) {
+                clearInterval(progressIntervalRef.current);
+            }
+        };
     }, []);
     
     // Update zenodoToken in localStorage whenever it changes
@@ -363,6 +369,29 @@ const App: React.FC = () => {
         setIsGenerating(true);
         setUploadStatus(null);
         setStep(1);
+
+        const startProgressSimulation = (start: number, end: number, durationSeconds: number) => {
+            if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+            let current = start;
+            setGenerationProgress(start);
+            const step = (end - start) / (durationSeconds * 10); // 10 updates per second
+            progressIntervalRef.current = window.setInterval(() => {
+                current += step;
+                if (current >= end) {
+                    current = end;
+                    clearInterval(progressIntervalRef.current!);
+                    progressIntervalRef.current = null;
+                }
+                setGenerationProgress(Math.round(current));
+            }, 100);
+        };
+
+        const stopProgressSimulation = () => {
+            if (progressIntervalRef.current) {
+                clearInterval(progressIntervalRef.current);
+                progressIntervalRef.current = null;
+            }
+        };
         
         for (let i = 1; i <= articlesToProcess; i++) {
             if (isGenerationCancelled.current) break;
@@ -380,15 +409,16 @@ const App: React.FC = () => {
                 setFinalLatexCode('');
 
                 setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando um título inovador para ${selectedDiscipline} (Modelo: ${analysisModel})...`);
-                setGenerationProgress(5);
+                startProgressSimulation(0, 10, 4); // Simulate 0 to 10 in 4s
                 // Use getRandomTopic with selectedDiscipline
                 const randomTopic = getRandomTopic(selectedDiscipline);
                 // Pass selectedDiscipline to the title generator
                 temporaryTitle = await generatePaperTitle(randomTopic, language, analysisModel, selectedDiscipline);
                 setGeneratedTitle(temporaryTitle);
+                stopProgressSimulation();
 
                 setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando a primeira versão (Modelo: ${generationModel})...`);
-                setGenerationProgress(15);
+                startProgressSimulation(10, 75, 55); // Simulate 10 to 75 in 55s
                 const { paper: initialPaper, sources } = await generateInitialPaper(
                     temporaryTitle, 
                     language, 
@@ -398,35 +428,45 @@ const App: React.FC = () => {
                 );
                 currentPaper = initialPaper;
                 setPaperSources(sources);
+                stopProgressSimulation();
 
                 for (let iter = 1; iter <= TOTAL_ITERATIONS; iter++) {
                     if (isGenerationCancelled.current) throw new Error("Operação cancelada pelo usuário.");
-                    setGenerationProgress(15 + (iter / TOTAL_ITERATIONS) * 75);
+                    const progressStart = 75 + ((iter - 1) / TOTAL_ITERATIONS) * 15;
+                    const progressEnd = 75 + (iter / TOTAL_ITERATIONS) * 15;
+                    
                     setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Analisando (iteração ${iter}/${TOTAL_ITERATIONS}) (Modelo: ${analysisModel})...`);
+                    startProgressSimulation(progressStart, progressEnd, 15); // Simulate analysis in 15s
                     const analysisResult = await analyzePaper(currentPaper, pageCount, analysisModel);
                     const validAnalysisItems = analysisResult.analysis.filter(res => ANALYSIS_TOPICS.some(topic => topic.num === res.topicNum));
                     setAnalysisResults(prev => [...prev, { iteration: iter, results: validAnalysisItems.map(res => ({ topic: ANALYSIS_TOPICS.find(t => t.num === res.topicNum)!, score: res.score, scoreClass: getScoreClass(res.score), improvement: res.improvement })) }]);
+                    stopProgressSimulation();
+                    
                     if (!validAnalysisItems.some(res => res.score < 7.0)) break;
                     if (iter < TOTAL_ITERATIONS) {
                         setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Refinando com base no feedback ${iter}... (Modelo: ${generationModel})`);
+                        startProgressSimulation(progressEnd - 3, progressEnd, 20); // Simulate refinement in 20s
                         currentPaper = await improvePaper(currentPaper, { analysis: validAnalysisItems }, language, generationModel);
+                        stopProgressSimulation();
                     }
                 }
 
                 if (isGenerationCancelled.current) continue;
 
                 setFinalLatexCode(currentPaper);
-                setGenerationProgress(95);
+                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Compilando documento LaTeX...`);
+                startProgressSimulation(90, 97, 15); // Simulate compilation in 15s
                 let compiledFile: File | null = null;
                 const compilationUpdater = (message: string) => setGenerationStatus(`Artigo ${i}/${articlesToProcess}: ${message}`);
                 const { pdfFile, finalCode } = await robustCompile(currentPaper, compilationUpdater);
                 compiledFile = pdfFile;
                 currentPaper = finalCode;
+                stopProgressSimulation();
 
                 if (isGenerationCancelled.current) continue;
 
                 setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Publicando no Zenodo...`);
-                setGenerationProgress(98);
+                startProgressSimulation(97, 99, 10); // Simulate upload in 10s
                 const metadataForUpload = extractMetadata(currentPaper, true);
                 const keywordsForUpload = currentPaper.match(/\\keywords\{([^}]+)\}/)?.[1] || '';
                 let publishedResult: PublishedArticle | null = null;
@@ -491,6 +531,7 @@ const App: React.FC = () => {
                 }
 
             } catch (error) {
+                stopProgressSimulation();
                 const errorMessage = error instanceof Error ? error.message : `Ocorreu um erro desconhecido no artigo ${i}.`;
                 console.error(`Error processing article ${i}:`, error);
 
