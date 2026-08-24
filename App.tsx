@@ -420,14 +420,16 @@ const App: React.FC = () => {
                 setGeneratedTitle(temporaryTitle);
                 stopProgressSimulation();
 
-                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando a primeira versão (Modelo: ${generationModel})...`);
-                startProgressSimulation(10, 75, 55); // Simulate 10 to 75 in 55s
+                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Iniciando geração modularizada (Modelo: ${generationModel})...`);
+                startProgressSimulation(10, 75, 120); // Simulação de progresso adaptada para o processo modularizado sequencial
                 const { paper: initialPaper, sources } = await generateInitialPaper(
                     temporaryTitle, 
                     language, 
                     pageCount, 
                     generationModel, 
-                    authors // Pass dynamic authors array
+                    authors, // Pass dynamic authors array
+                    (status: string) => setGenerationStatus(`Artigo ${i}/${articlesToProcess}: ${status}`),
+                    selectedDiscipline
                 );
                 currentPaper = initialPaper;
                 setPaperSources(sources);

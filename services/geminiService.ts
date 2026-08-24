@@ -552,47 +552,254 @@ async function fetchSemanticScholarPapers(query: string, limit: number = 5): Pro
     }
 }
 
-export async function generateInitialPaper(title: string, language: Language, pageCount: number, model: string, authorDetails: PersonalData[]): Promise<{ paper: string, sources: PaperSource[] }> {
+export async function generateInitialPaper(
+    title: string, 
+    language: Language, 
+    pageCount: number, 
+    model: string, 
+    authorDetails: PersonalData[],
+    onProgress?: (status: string) => void,
+    discipline?: string
+): Promise<{ paper: string, sources: PaperSource[] }> {
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
     const babelLanguage = BABEL_LANG_MAP[language];
     const referenceCount = 10;
     const referencePlaceholders = Array.from({ length: referenceCount }, (_, i) => `[INSERT REFERENCE ${i + 1} HERE]`).join('\n\n');
+    
+    if (onProgress) onProgress("Buscando fontes acadêmicas e referências no Semantic Scholar...");
     const semanticScholarPapers = await fetchSemanticScholarPapers(title, referenceCount);
     const semanticScholarContext = semanticScholarPapers.length > 0
         ? "\n\n**Additional Academic Sources from Semantic Scholar (prioritize these):**\n" +
           semanticScholarPapers.map(p => `- Title: ${p.title}\n  Authors: ${p.authors.map(a => a.name).join(', ')}\n  Abstract: ${p.abstract || 'N/A'}\n  URL: ${p.url}`).join('\n---\n')
         : "";
-    const latexAuthorsBlock = authorDetails.map((author, index) => {
+
+    const latexAuthorsBlock = authorDetails.map((author) => {
         const name = author.name || 'Unknown Author';
         const affiliation = author.affiliation ? `\\\\ ${author.affiliation}` : '';
         const orcid = author.orcid ? `\\\\ \\small ORCID: \\url{https://orcid.org/${author.orcid}}` : '';
         return `${name}${affiliation}${orcid}`;
     }).join(' \\and\n');
     const pdfAuthorNames = authorDetails.map(a => a.name).filter(Boolean).join(', ');
-    const systemInstruction = `Act as a world-class AI specialized in generating LaTeX scientific papers. Write a complete, rigorous paper based on the title, strictly following the provided LaTeX template.
-    **Rules:**
-    1.  **Use Template:** Fill all placeholders [INSERT...] with relevant content.
-    2.  **References:** Generate ${referenceCount} unique, **strictly academic citations**. NO \\bibitem. NO URLs.
-    3.  **Language:** Write in **${languageName}**.
-    4.  **Format:** Return valid LaTeX. NO ampersands (&) in text. NO CJK characters.
-    5.  **CRITICAL - VISUAL GRAPHICS:** Do NOT use \\includegraphics or load external image files (as they do not exist on the system). Instead, you are highly encouraged to create beautiful, publication-quality vector diagrams, flowcharts, schemas, or mathematical plots using clean, native TikZ or pgfplots inside standard \\begin{figure}[h]...\\end{figure} environments. Always include descriptive \\caption and labels.`;
-    let templateWithBabelAndAuthor = ARTICLE_TEMPLATE.replace('% Babel package will be added dynamically based on language', `\\usepackage[${babelLanguage}]{babel}`).replace('[INSERT REFERENCE COUNT]', String(referenceCount)).replace('[INSERT NEW REFERENCE LIST HERE]', referencePlaceholders);
-    templateWithBabelAndAuthor = templateWithBabelAndAuthor.replace('__ALL_AUTHORS_LATEX_BLOCK__', latexAuthorsBlock);
-    templateWithBabelAndAuthor = templateWithBabelAndAuthor.replace('pdfauthor={__PDF_AUTHOR_NAMES_PLACEHOLDER__}', `pdfauthor={${pdfAuthorNames}}`);
-    const userPrompt = `Title: "${title}".\n${semanticScholarContext}\n**Template:**\n\`\`\`latex\n${templateWithBabelAndAuthor}\n\`\`\`\n`;
-    const response = await callModel(model, systemInstruction, userPrompt, { googleSearch: true });
-    if (!response.candidates || response.candidates.length === 0) {
-        throw new Error("AI returned no candidates. This usually means the model refused the prompt (safety/policy).");
+
+    // 1. Initialize overall paper LaTeX code template
+    let finalPaperCode = ARTICLE_TEMPLATE.replace('% Babel package will be added dynamically based on language', `\\usepackage[${babelLanguage}]{babel}`).replace('[INSERT REFERENCE COUNT]', String(referenceCount)).replace('[INSERT NEW REFERENCE LIST HERE]', referencePlaceholders);
+    finalPaperCode = finalPaperCode.replace('__ALL_AUTHORS_LATEX_BLOCK__', latexAuthorsBlock);
+    finalPaperCode = finalPaperCode.replace('pdfauthor={__PDF_AUTHOR_NAMES_PLACEHOLDER__}', `pdfauthor={${pdfAuthorNames}}`);
+    finalPaperCode = finalPaperCode.replace(/\[INSERT NEW TITLE HERE\]/g, title);
+
+    const discName = discipline || 'Academic Research';
+
+    const cleanSegment = (text: string): string => {
+        if (!text) return '';
+        let cleaned = extractLatexFromResponse(text);
+        cleaned = cleaned.replace(/\\documentclass[\s\S]*?\\begin\{document\}/g, '');
+        cleaned = cleaned.replace(/\\end\{document\}/g, '');
+        cleaned = cleaned.replace(/\\maketitle/g, '');
+        cleaned = cleaned.replace(/\\title\{.*?\}/g, '');
+        cleaned = cleaned.replace(/\\author\{.*?\}/g, '');
+        cleaned = cleaned.replace(/\\date\{.*?\}/g, '');
+        cleaned = cleaned.replace(/\\begin\{abstract\}/g, '');
+        cleaned = cleaned.replace(/\\end\{abstract\}/g, '');
+        return cleaned.trim();
+    };
+
+    // Define segments/sections to write sequentially
+    const segments = [
+        {
+            id: 'abstract',
+            name: language === 'pt' ? 'Resumo & Palavras-chave' : language === 'es' ? 'Resumen & Palabras clave' : 'Abstract & Keywords',
+            placeholder: '[INSERT NEW COMPLETE ABSTRACT HERE. This must be plain text without LaTeX commands.]',
+            keywordsPlaceholder: '[INSERT COMMA-SEPARATED KEYWORDS HERE]',
+            prompt: `Write the Abstract and Keywords for the scientific paper titled "${title}" in the field of ${discName}.
+The abstract must be a single paragraph of dense, rigorous, comprehensive academic summary (approx. 200-250 words) outlining the research context, objective, methodology, key findings, and implications.
+Also provide 4 to 6 comma-separated keywords.
+Provide your response strictly in the following format:
+ABSTRACT:
+<your abstract text here>
+KEYWORDS:
+<your keywords here>`
+        },
+        {
+            id: 'introduction',
+            name: language === 'pt' ? 'Introdução' : language === 'es' ? 'Introducción' : 'Introduction',
+            placeholder: '[INSERT NEW CONTENT FOR INTRODUCTION SECTION HERE. The content must be extensive and detailed to meet the required page count.]',
+            prompt: (context: string) => `Write the complete "Introduction" section for the scientific paper titled "${title}" in the field of ${discName}.
+Context:
+${context}
+
+The introduction must be highly detailed, comprehensive, and academically rigorous (minimum 500-800 words), covering the general background, problem statement, research gap, specific objective of this paper, and the outline of the sections.
+Do NOT write the document preamble or section headers. Write ONLY the paragraph body content. Use standard LaTeX paragraphs separated by double newlines.`
+        },
+        {
+            id: 'literature',
+            name: language === 'pt' ? 'Revisão de Literatura' : language === 'es' ? 'Revisión de Literatura' : 'Literature Review',
+            placeholder: '[INSERT NEW CONTENT FOR LITERATURE REVIEW SECTION HERE. The content must be extensive and detailed to meet the required page count.]',
+            prompt: (context: string) => `Write the complete "Literature Review" section for the scientific paper titled "${title}" in ${discName}.
+Context:
+${context}
+${semanticScholarContext}
+
+Provide a deep, critical review of previous scholarly works, comparing and contrasting different theoretical frameworks and empirical studies, and highlighting the gap this research addresses (minimum 600-900 words).
+Do NOT write the section header. Write ONLY the paragraph body content. Use citations like [1], [2], etc., where appropriate.`
+        },
+        {
+            id: 'methodology',
+            name: language === 'pt' ? 'Metodologia' : language === 'es' ? 'Metodología' : 'Methodology',
+            placeholder: '[INSERT NEW CONTENT FOR METHODOLOGY SECTION HERE. The content must be extensive and detailed to meet the required page count.]',
+            prompt: (context: string) => `Write the complete "Methodology" section for the scientific paper titled "${title}" in ${discName}.
+Context:
+${context}
+
+Describe the research design, data collection procedures, sample characteristics, variables/instruments, and analytical/statistical techniques in precise detail (minimum 500-800 words).
+Do NOT write the section header. Write ONLY the body content. You are highly encouraged to include mathematical equations in LaTeX format, itemized steps, or a beautiful professional flowchart/diagram using native LaTeX TikZ commands to visually represent the methodology.`
+        },
+        {
+            id: 'results',
+            name: language === 'pt' ? 'Resultados' : language === 'es' ? 'Resultados' : 'Results',
+            placeholder: '[INSERT NEW CONTENT FOR RESULTS SECTION HERE. The content must be extensive and detailed to meet the required page count.]',
+            prompt: (context: string) => `Write the complete "Results" section for the scientific paper titled "${title}" in ${discName}.
+Context:
+${context}
+
+Present the empirical findings and analysis of data with high scientific precision (minimum 500-800 words).
+Do NOT write the section header. Write ONLY the body content. You are highly encouraged to include LaTeX tables (e.g. using tabular, with clean academic formatting) or beautiful vector plots/charts using native pgfplots/TikZ commands to illustrate the results.`
+        },
+        {
+            id: 'discussion',
+            name: language === 'pt' ? 'Discussão' : language === 'es' ? 'Discusión' : 'Discussion',
+            placeholder: '[INSERT NEW CONTENT FOR DISCUSSION SECTION HERE. The content must be extensive and detailed to meet the required page count.]',
+            prompt: (context: string) => `Write the complete "Discussion" section for the scientific paper titled "${title}" in ${discName}.
+Context:
+${context}
+
+Interpret the empirical findings, discuss how they support or challenge previous literature, analyze theoretical and practical implications, and clearly address any limitations of the study (minimum 500-800 words).
+Do NOT write the section header. Write ONLY the body content.`
+        },
+        {
+            id: 'conclusion',
+            name: language === 'pt' ? 'Conclusão' : language === 'es' ? 'Conclusión' : 'Conclusion',
+            placeholder: '[INSERT NEW CONTENT FOR CONCLUSION SECTION HERE. The content must be extensive and detailed to meet the required page count.]',
+            prompt: (context: string) => `Write the complete "Conclusion" section for the scientific paper titled "${title}" in ${discName}.
+Context:
+${context}
+
+Summarize the key findings, restate the main contributions, and suggest future avenues for research (approx. 300-500 words).
+Do NOT write the section header. Write ONLY the body content.`
+        },
+        {
+            id: 'references',
+            name: language === 'pt' ? 'Referências Bibliográficas' : language === 'es' ? 'Referencias' : 'References',
+            placeholder: '[INSERT NEW REFERENCE LIST HERE]',
+            prompt: (context: string) => `Generate the complete list of academic references for the paper titled "${title}" in ${discName}.
+The list should contain exactly 10 high-quality, strictly academic citations in standard academic format (APA or IEEE) relevant to the topic.
+Provide the response as plain paragraphs, each starting with \\noindent and ending with \\par.
+CRITICAL: Absolutely DO NOT use \\begin{thebibliography} or \\bibitem. Generate exactly 10 bibliography entries.
+Example:
+\\noindent [1] Author, A. (2025). Title of the article. *Journal Name*, 1(2), 10-20. \\par
+\\noindent [2] Author, B. (2026). Book Title. *Publisher*. \\par`
+        }
+    ];
+
+    let runningContext = `Title: ${title}\nDiscipline: ${discName}`;
+    let gatheredSources: PaperSource[] = [];
+
+    const COOLDOWN_SECONDS = 8; // Confortável espaçamento de 8 segundos entre as chamadas de seções
+
+    for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+
+        if (onProgress) {
+            onProgress(`Escrevendo a seção: ${seg.name}... (Parte ${i + 1} de ${segments.length})`);
+        }
+
+        const systemInstruction = `Act as an expert academic researcher and LaTeX writer.
+Your task is to write the specific section: "${seg.name}" for a scientific paper titled "${title}" in ${discName}.
+Language: Write the entire section content strictly in **${languageName}**.
+LaTeX Rules:
+1. Do NOT write the document preamble, \\documentclass, or \\begin{document}. Just write the text of this section.
+2. Ensure there are NO unescaped ampersands (&) or raw unicode characters (use LaTeX macros instead).
+3. Do NOT use \\includegraphics. If you want to include figures or charts, write them using beautiful native TikZ or pgfplots environments.
+4. Keep the style highly formal, objective, and scholarly.`;
+
+        const userPrompt = typeof seg.prompt === 'function' ? seg.prompt(runningContext) : seg.prompt;
+        
+        let attempts = 0;
+        let responseText = '';
+        let stepSources: PaperSource[] = [];
+
+        while (attempts < 2) {
+            try {
+                const response = await callModel(model, systemInstruction, userPrompt, { googleSearch: true });
+                if (response.text) {
+                    responseText = response.text;
+                    stepSources = response.candidates?.[0]?.groundingMetadata?.groundingChunks?.filter(chunk => chunk.web).map(chunk => ({ uri: chunk.web.uri, title: chunk.web.title, })) || [];
+                    break;
+                }
+            } catch (err) {
+                attempts++;
+                if (attempts >= 2) throw err;
+                if (onProgress) onProgress(`Retentando seção ${seg.name} em 5 segundos devido a erro temporário...`);
+                await delay(5000);
+            }
+        }
+
+        if (!responseText) {
+            throw new Error(`A geração da seção ${seg.name} retornou um texto vazio.`);
+        }
+
+        gatheredSources = [...gatheredSources, ...stepSources];
+
+        if (seg.id === 'abstract') {
+            let abstractText = '';
+            let keywordsText = '';
+            const abstractMatch = responseText.match(/ABSTRACT:\s*([\s\S]*?)(?=KEYWORDS:|$)/i);
+            const keywordsMatch = responseText.match(/KEYWORDS:\s*([\s\S]*?)$/i);
+            
+            if (abstractMatch) {
+                abstractText = abstractMatch[1].trim();
+            } else {
+                abstractText = responseText.replace(/ABSTRACT:/i, '').replace(/KEYWORDS:[\s\S]*$/i, '').trim();
+            }
+            
+            if (keywordsMatch) {
+                keywordsText = keywordsMatch[1].trim();
+            } else {
+                keywordsText = 'scientific paper, academic research, analysis';
+            }
+
+            finalPaperCode = finalPaperCode.replace(seg.placeholder, abstractText);
+            if (seg.keywordsPlaceholder) {
+                finalPaperCode = finalPaperCode.replace(seg.keywordsPlaceholder, keywordsText);
+            }
+            runningContext += `\n\nAbstract: ${abstractText.substring(0, 400)}`;
+        } else {
+            const cleanedBody = cleanSegment(responseText);
+            finalPaperCode = finalPaperCode.replace(seg.placeholder, cleanedBody);
+            runningContext += `\n\n${seg.name}: ${cleanedBody.substring(0, 300)}...`;
+        }
+
+        // Aguardar o cooldown anti-bloqueio entre seções (exceto após a última seção)
+        if (i < segments.length - 1) {
+            for (let sec = COOLDOWN_SECONDS; sec > 0; sec--) {
+                if (onProgress) {
+                    onProgress(`Pausa anti-bloqueio: Aguardando ${sec}s antes de iniciar a seção "${segments[i + 1].name}"...`);
+                }
+                await delay(1000);
+            }
+        }
     }
-    if (!response.text) {
-        throw new Error(`AI returned an empty text response.`);
+
+    // Unify all sources gathered along the path, removing duplicates
+    const uniqueSources: PaperSource[] = [];
+    const seenUris = new Set<string>();
+    for (const src of gatheredSources) {
+        if (!seenUris.has(src.uri)) {
+            seenUris.add(src.uri);
+            uniqueSources.push(src);
+        }
     }
-    let paper = extractLatexFromResponse(response.text);
-    if (!paper.includes('\\end{document}')) {
-        paper += '\n\\end{document}';
-    }
-    const sources: PaperSource[] = response.candidates?.[0]?.groundingMetadata?.groundingChunks?.filter(chunk => chunk.web).map(chunk => ({ uri: chunk.web.uri, title: chunk.web.title, })) || [];
-    return { paper: postProcessLatex(paper), sources };
+
+    return { paper: postProcessLatex(finalPaperCode), sources: uniqueSources };
 }
 
 function cleanJsonOutput(text: string): string {
