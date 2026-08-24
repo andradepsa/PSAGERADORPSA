@@ -167,6 +167,40 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
     throw new Error("API call failed after internal retries.");
 }
 
+let lastExternalCallTime = 0;
+
+async function withExternalRateLimit<T>(apiCall: () => Promise<T>): Promise<T> {
+    const MIN_COOLDOWN = 6000; // 6 seconds spacing (prevents rate limits on free providers)
+    const MAX_RETRIES = 4;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        const now = Date.now();
+        const elapsed = now - lastExternalCallTime;
+        if (elapsed < MIN_COOLDOWN) {
+            const waitTime = MIN_COOLDOWN - elapsed;
+            console.log(`[External Cooldown] Spacing requests. Waiting ${waitTime}ms to avoid 429...`);
+            await delay(waitTime);
+        }
+
+        try {
+            lastExternalCallTime = Date.now();
+            return await apiCall();
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            const is429 = errorMsg.includes('429') || errorMsg.toLowerCase().includes('too many requests') || errorMsg.toLowerCase().includes('rate limit');
+
+            if (is429 && attempt < MAX_RETRIES) {
+                const backoff = attempt * 12000; // Progressive wait: 12s, 24s, 36s, 48s to clear server windows
+                console.warn(`[External Rate Limit] Received 429 (Attempt ${attempt}/${MAX_RETRIES}). Waiting ${backoff / 1000} seconds to clear rate limit...`);
+                await delay(backoff);
+                continue;
+            }
+            throw error;
+        }
+    }
+    throw new Error("External API call failed after multiple rate limit retries.");
+}
+
 async function callModel(
     model: string,
     systemInstruction: string,
@@ -192,6 +226,35 @@ async function callModel(
                 },
             });
         }, targetModel);
+    };
+
+    const runGeminiFallback = async (originalModel: string, lastError: any) => {
+        console.warn(`[Gemini Service] Model ${originalModel} failed or exceeded limits: ${lastError instanceof Error ? lastError.message : String(lastError)}. Falling back to Gemini models to maintain the automation flow.`);
+        const fallbackChain = [
+            'gemini-3.7-flash',
+            'gemini-flash-latest',
+            'gemini-3.1-flash-lite',
+            'gemini-3.1-pro-preview'
+        ];
+        let finalError = lastError;
+        for (const targetModel of fallbackChain) {
+            try {
+                console.warn(`[Gemini Service] Attempting fallback to ${targetModel}...`);
+                return await runCall(targetModel);
+            } catch (fallbackErr) {
+                finalError = fallbackErr;
+                const errStr = fallbackErr instanceof Error ? fallbackErr.message.toLowerCase() : String(fallbackErr).toLowerCase();
+                const isQuotaExhausted = errStr.includes('exhausted') || errStr.includes('quota') || errStr.includes('limit') || errStr.includes('429');
+                const isOverloaded = errStr.includes('503') || errStr.includes('overloaded') || errStr.includes('unavailable');
+
+                if (isQuotaExhausted || isOverloaded) {
+                    continue; // Try the next fallback model in our cascade list
+                } else {
+                    throw fallbackErr; // Critical non-retryable error, throw immediately
+                }
+            }
+        }
+        throw finalError;
     };
 
     if (model.startsWith('gemini-')) {
@@ -233,122 +296,130 @@ async function callModel(
         throw lastError;
 
     } else if (model.startsWith('grok-')) {
-        const apiKey = localStorage.getItem('xai_api_key');
-        if (!apiKey) {
-            throw new Error("x.ai API key not found. Please set it in the settings modal (gear icon).");
-        }
-
-        const messages = [
-            { role: 'system', content: systemInstruction },
-            { role: 'user', content: userPrompt }
-        ];
-
-        const apiCall = async () => {
-            const response = await fetch('https://api.x.ai/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${apiKey}`
-                },
-                body: JSON.stringify({
-                    model: model,
-                    messages: messages,
-                    stream: false,
-                    temperature: 0,
-                })
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(`x.ai API Error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`);
+        try {
+            const apiKey = localStorage.getItem('xai_api_key');
+            if (!apiKey) {
+                throw new Error("x.ai API key not found. Please set it in the settings modal (gear icon).");
             }
 
-            const data = await response.json();
-            const text = data.choices?.[0]?.message?.content || '';
-            
-            const reconstructedResponse = {
-                candidates: [{
-                    content: { parts: [{ text: text }], role: 'model' },
-                    finishReason: 'STOP',
-                    index: 0,
-                    safetyRatings: [],
-                    groundingMetadata: { groundingChunks: [] }
-                }],
-                functionCalls: [],
-                get text() {
-                    return this.candidates?.[0]?.content?.parts?.map(p => p.text).join('') || '';
-                }
-            };
-            return reconstructedResponse as GenerateContentResponse;
-        };
+            const messages = [
+                { role: 'system', content: systemInstruction },
+                { role: 'user', content: userPrompt }
+            ];
 
-        return withRateLimitHandling(apiCall);
-    } else if (model === 'stealth/ox-alpha') {
-        const apiKey = localStorage.getItem('openrouter_api_key');
-        if (!apiKey) {
-            throw new Error("OpenRouter API key not found. Please set it in the settings modal (gear icon).");
-        }
+            const apiCall = async () => {
+                const response = await fetch('https://api.x.ai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: model,
+                        messages: messages,
+                        stream: false,
+                        temperature: 0,
+                    })
+                });
 
-        const messages = [
-            { role: 'system', content: systemInstruction },
-            { role: 'user', content: userPrompt }
-        ];
-
-        const apiCall = async () => {
-            const safeReferer = (typeof window !== 'undefined' && window.location && window.location.origin && window.location.origin !== 'null') 
-                ? window.location.origin 
-                : 'https://ai.studio';
-
-            const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${apiKey}`,
-                    'HTTP-Referer': safeReferer,
-                    'X-Title': 'Scientific Paper Generator'
-                },
-                body: JSON.stringify({
-                    model: model,
-                    messages: messages,
-                    stream: false,
-                    temperature: 0,
-                })
-            });
-
-            if (!response.ok) {
-                let errorMsg = `OpenRouter API Error: ${response.status}`;
-                try {
+                if (!response.ok) {
                     const errorData = await response.json();
-                    errorMsg += ` - ${errorData.error?.message || 'Unknown error'}`;
-                } catch (_) {
-                    try {
-                        const errorText = await response.text();
-                        errorMsg += ` - ${errorText.substring(0, 150)}`;
-                    } catch (__) {}
+                    throw new Error(`x.ai API Error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`);
                 }
-                throw new Error(errorMsg);
+
+                const data = await response.json();
+                const text = data.choices?.[0]?.message?.content || '';
+                
+                const reconstructedResponse = {
+                    candidates: [{
+                        content: { parts: [{ text: text }], role: 'model' },
+                        finishReason: 'STOP',
+                        index: 0,
+                        safetyRatings: [],
+                        groundingMetadata: { groundingChunks: [] }
+                    }],
+                    functionCalls: [],
+                    get text() {
+                        return this.candidates?.[0]?.content?.parts?.map(p => p.text).join('') || '';
+                    }
+                };
+                return reconstructedResponse as GenerateContentResponse;
+            };
+
+            return await withExternalRateLimit(apiCall);
+        } catch (error) {
+            return await runGeminiFallback(model, error);
+        }
+    } else if (model === 'stealth/ox-alpha') {
+        try {
+            const apiKey = localStorage.getItem('openrouter_api_key');
+            if (!apiKey) {
+                throw new Error("OpenRouter API key not found. Please set it in the settings modal (gear icon).");
             }
 
-            const data = await response.json();
-            const text = data.choices?.[0]?.message?.content || '';
-            
-            const reconstructedResponse = {
-                candidates: [{
-                    content: { parts: [{ text: text }], role: 'model' },
-                    finishReason: 'STOP',
-                    index: 0,
-                    safetyRatings: [],
-                    groundingMetadata: { groundingChunks: [] }
-                }],
-                functionCalls: [],
-                get text() {
-                    return this.candidates?.[0]?.content?.parts?.map(p => p.text).join('') || '';
-                }
-            };
-            return reconstructedResponse as GenerateContentResponse;
-        };
+            const messages = [
+                { role: 'system', content: systemInstruction },
+                { role: 'user', content: userPrompt }
+            ];
 
-        return withRateLimitHandling(apiCall);
+            const apiCall = async () => {
+                const safeReferer = (typeof window !== 'undefined' && window.location && window.location.origin && window.location.origin !== 'null') 
+                    ? window.location.origin 
+                    : 'https://ai.studio';
+
+                const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`,
+                        'HTTP-Referer': safeReferer,
+                        'X-Title': 'Scientific Paper Generator'
+                    },
+                    body: JSON.stringify({
+                        model: model,
+                        messages: messages,
+                        stream: false,
+                        temperature: 0,
+                    })
+                });
+
+                if (!response.ok) {
+                    let errorMsg = `OpenRouter API Error: ${response.status}`;
+                    try {
+                        const errorData = await response.json();
+                        errorMsg += ` - ${errorData.error?.message || 'Unknown error'}`;
+                    } catch (_) {
+                        try {
+                            const errorText = await response.text();
+                            errorMsg += ` - ${errorText.substring(0, 150)}`;
+                        } catch (__) {}
+                    }
+                    throw new Error(errorMsg);
+                }
+
+                const data = await response.json();
+                const text = data.choices?.[0]?.message?.content || '';
+                
+                const reconstructedResponse = {
+                    candidates: [{
+                        content: { parts: [{ text: text }], role: 'model' },
+                        finishReason: 'STOP',
+                        index: 0,
+                        safetyRatings: [],
+                        groundingMetadata: { groundingChunks: [] }
+                    }],
+                    functionCalls: [],
+                    get text() {
+                        return this.candidates?.[0]?.content?.parts?.map(p => p.text).join('') || '';
+                    }
+                };
+                return reconstructedResponse as GenerateContentResponse;
+            };
+
+            return await withExternalRateLimit(apiCall);
+        } catch (error) {
+            return await runGeminiFallback(model, error);
+        }
     } else {
         throw new Error(`Unsupported model: ${model}`);
     }
