@@ -201,31 +201,42 @@ async function callModel(
     };
 
     if (model.startsWith('gemini-')) {
-        try {
-            return await runCall(model);
-        } catch (error) {
-            const errStr = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-            const isQuotaExhausted = errStr.includes('exhausted') || errStr.includes('quota') || errStr.includes('limit') || errStr.includes('429');
+        const fallbackChain = [
+            'gemini-3.7-flash',
+            'gemini-flash-latest',
+            'gemini-3.1-flash-lite',
+            'gemini-3.1-pro-preview'
+        ];
 
-            if (isQuotaExhausted) {
-                let fallbackModel: string | null = null;
-                
-                // Fallback Chain for modern Gemini models
-                if (model === 'gemini-3.7-flash') {
-                    fallbackModel = 'gemini-flash-latest';
-                } else if (model === 'gemini-flash-latest') {
-                    fallbackModel = 'gemini-3.1-flash-lite';
-                } else if (model === 'gemini-3.1-pro-preview') {
-                    fallbackModel = 'gemini-3.7-flash';
+        // Create a list of models to try starting with the requested model
+        const modelsToTry: string[] = [model];
+        for (const m of fallbackChain) {
+            if (m !== model) {
+                modelsToTry.push(m);
+            }
+        }
+
+        let lastError: any = null;
+        for (const targetModel of modelsToTry) {
+            try {
+                if (targetModel !== model) {
+                    console.warn(`[Gemini Service] Primary model failed/overloaded. Falling back to ${targetModel} to maintain automation flow.`);
                 }
+                return await runCall(targetModel);
+            } catch (error) {
+                lastError = error;
+                const errStr = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+                const isQuotaExhausted = errStr.includes('exhausted') || errStr.includes('quota') || errStr.includes('limit') || errStr.includes('429');
+                const isOverloaded = errStr.includes('503') || errStr.includes('overloaded') || errStr.includes('unavailable');
 
-                if (fallbackModel) {
-                    console.warn(`[Gemini Service] Primary model ${model} quota exhausted. Falling back to ${fallbackModel} to maintain automation flow.`);
-                    return await runCall(fallbackModel);
+                if (isQuotaExhausted || isOverloaded) {
+                    continue; // Try the next fallback model in our cascade list
+                } else {
+                    throw error; // Critical non-retryable error, throw immediately
                 }
             }
-            throw error;
         }
+        throw lastError;
 
     } else if (model.startsWith('grok-')) {
         const apiKey = localStorage.getItem('xai_api_key');
