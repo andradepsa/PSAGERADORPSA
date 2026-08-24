@@ -367,9 +367,19 @@ export async function generatePaperTitle(topic: string, language: Language, mode
 
 function postProcessLatex(latexCode: string): string {
     let code = latexCode;
-    code = code.replace(/\\begin\{figure\*?\}([\s\S]*?)\\end\{figure\*?\}/g, '');
-    code = code.replace(/\\includegraphics\s*(\[.*?\])?\s*\{.*?\}/g, '');
+    // Allow figure environments so TikZ and tables compile perfectly!
+    code = code.replace(/\\includegraphics\s*(\[.*?\])?\s*\{.*?\}/g, '% [Image removed for compatibility]');
     code = code.replace(/\\captionof\s*\{figure\}\s*\{.*?\}/g, '');
+    
+    // Replace problematic raw Unicode characters with standard LaTeX macros
+    code = code.replace(/\u2014/g, '---'); // em-dash
+    code = code.replace(/\u2013/g, '--');  // en-dash
+    code = code.replace(/\u201c/g, '``');   // left double quote
+    code = code.replace(/\u201d/g, "''");   // right double quote
+    code = code.replace(/\u2018/g, '`');    // left single quote
+    code = code.replace(/\u2019/g, "'");    // right single quote
+    code = code.replace(/\u2026/g, '\\ldots{}'); // ellipsis
+    
     code = code.replace(/,?\s+&\s+/g, ' and ');
     code = code.replace(/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g, '');
     const environments = ['itemize', 'enumerate', 'description'];
@@ -487,7 +497,7 @@ export async function generateInitialPaper(title: string, language: Language, pa
     2.  **References:** Generate ${referenceCount} unique, **strictly academic citations**. NO \\bibitem. NO URLs.
     3.  **Language:** Write in **${languageName}**.
     4.  **Format:** Return valid LaTeX. NO ampersands (&) in text. NO CJK characters.
-    5.  **CRITICAL - NO IMAGES:** Do NOT use \\includegraphics, \\begin{figure}, or \\caption. Text only.`;
+    5.  **CRITICAL - VISUAL GRAPHICS:** Do NOT use \\includegraphics or load external image files (as they do not exist on the system). Instead, you are highly encouraged to create beautiful, publication-quality vector diagrams, flowcharts, schemas, or mathematical plots using clean, native TikZ or pgfplots inside standard \\begin{figure}[h]...\\end{figure} environments. Always include descriptive \\caption and labels.`;
     let templateWithBabelAndAuthor = ARTICLE_TEMPLATE.replace('% Babel package will be added dynamically based on language', `\\usepackage[${babelLanguage}]{babel}`).replace('[INSERT REFERENCE COUNT]', String(referenceCount)).replace('[INSERT NEW REFERENCE LIST HERE]', referencePlaceholders);
     templateWithBabelAndAuthor = templateWithBabelAndAuthor.replace('__ALL_AUTHORS_LATEX_BLOCK__', latexAuthorsBlock);
     templateWithBabelAndAuthor = templateWithBabelAndAuthor.replace('pdfauthor={__PDF_AUTHOR_NAMES_PLACEHOLDER__}', `pdfauthor={${pdfAuthorNames}}`);

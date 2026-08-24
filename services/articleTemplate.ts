@@ -5,6 +5,10 @@ export const ARTICLE_TEMPLATE = `\\documentclass[12pt,a4paper]{article}
 \\usepackage[utf8]{inputenc}
 \\usepackage[T1]{fontenc}
 \\usepackage{amsmath, amssymb, geometry, setspace, url, verbatim}
+\\usepackage{tikz}
+\\usepackage{pgfplots}
+\\pgfplotsset{compat=1.18}
+\\usetikzlibrary{shapes,arrows,positioning,calc,chains}
 % Babel package will be added dynamically based on language
 \\usepackage[unicode=true]{hyperref}
 
