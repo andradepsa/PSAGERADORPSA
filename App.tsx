@@ -43,8 +43,8 @@ const App: React.FC = () => {
 
     // == STEP 1: GENERATION STATE ==
     const [language, setLanguage] = useState<Language>('en');
-    const [generationModel, setGenerationModel] = useState('gemini-2.5-flash');
-    const [analysisModel, setAnalysisModel] = useState('gemini-2.5-flash');
+    const [generationModel, setGenerationModel] = useState('gemini-3.7-flash');
+    const [analysisModel, setAnalysisModel] = useState('gemini-3.7-flash');
     // REMOVIDAS AS OPÇÕES DE 30, 60, 100 PAGINAS. PADRÃO FIXO EM 10.
     const [pageCount, setPageCount] = useState(10);
     const [isGenerating, setIsGenerating] = useState(false);

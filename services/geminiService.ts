@@ -210,11 +210,13 @@ async function callModel(
             if (isQuotaExhausted) {
                 let fallbackModel: string | null = null;
                 
-                // Chain: gemini-3-flash-preview -> gemini-2.5-flash -> gemini-2.0-flash
-                if (model === 'gemini-3-flash-preview') {
-                    fallbackModel = 'gemini-2.5-flash';
-                } else if (model === 'gemini-2.5-flash') {
-                    fallbackModel = 'gemini-2.0-flash';
+                // Fallback Chain for modern Gemini models
+                if (model === 'gemini-3.7-flash') {
+                    fallbackModel = 'gemini-flash-latest';
+                } else if (model === 'gemini-flash-latest') {
+                    fallbackModel = 'gemini-3.1-flash-lite';
+                } else if (model === 'gemini-3.1-pro-preview') {
+                    fallbackModel = 'gemini-3.7-flash';
                 }
 
                 if (fallbackModel) {
@@ -501,7 +503,7 @@ export async function improvePaper(paperContent: string, analysis: AnalysisResul
         bodyToImprove = cleanPaper.substring(docStartIndex);
     }
     const userPrompt = `Context: ${preamble}\nBody: ${bodyToImprove}\nFeedback: ${improvementPoints}\nTask: Return COMPLETE improved body.`;
-    const response = await callModel('gemini-2.5-flash', systemInstruction, userPrompt);
+    const response = await callModel(model, systemInstruction, userPrompt);
     if (!response.text) throw new Error("AI returned an empty response for improvement.");
     let improvedBody = extractLatexFromResponse(response.text);
     if (docStartIndex !== -1 && !improvedBody.includes('\\documentclass')) {

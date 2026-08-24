@@ -9,13 +9,11 @@ export const LANGUAGES: LanguageOption[] = [
 ];
 
 export const AVAILABLE_MODELS: {name: string, description: string}[] = [
-    { name: 'gemini-3-flash-preview', description: 'Google: Próxima geração Flash (Ultra-rápido e eficiente).' },
-    { name: 'gemini-2.5-flash', description: 'Google: Rápido e eficiente para a maioria das tarefas.' },
-    { name: 'gemini-2.5-pro', description: 'Google: Mais poderoso para geração complexa e raciocínio.' },
-    { name: 'gemini-3-pro-preview', description: 'Google: Modelo de última geração para raciocínio avançado.' },
-    { name: 'grok-4-latest', description: 'x.ai: Modelo poderoso da x.ai.' },
-    { name: 'gemini-2.0-flash', description: 'Google: Modelo de alto rendimento com grande janela de contexto.' },
-    { name: 'gemini-2.0-flash-lite', description: 'Google: Leve e muito rápido para tarefas de alto volume.' },
+    { name: 'gemini-3.7-flash', description: 'Google: Modelo ideal para tarefas de texto gerais, rápido e inteligente.' },
+    { name: 'gemini-3.1-pro-preview', description: 'Google: Modelo de última geração para raciocínio avançado.' },
+    { name: 'gemini-flash-latest', description: 'Google: Modelo padrão estável e balanceado para automações.' },
+    { name: 'gemini-3.1-flash-lite', description: 'Google: Leve e ultra-rápido para tarefas de alto volume.' },
+    { name: 'grok-4-latest', description: 'x.ai: Modelo avançado de linguagem da x.ai.' }
 ];
 
 export const STYLE_GUIDES: StyleGuideOption[] = [
