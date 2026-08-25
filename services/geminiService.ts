@@ -201,6 +201,42 @@ async function withExternalRateLimit<T>(apiCall: () => Promise<T>): Promise<T> {
     throw new Error("External API call failed after multiple rate limit retries.");
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number = 40000, timeoutErrorMsg: string = "Operação excedeu o tempo limite."): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(timeoutErrorMsg)), timeoutMs);
+    });
+    try {
+        return await Promise.race([promise, timeoutPromise]);
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+}
+
+function getGeminiCandidateModels(requestedModel: string): string[] {
+    const standardPool = [
+        'gemini-2.5-flash',
+        'gemini-2.0-flash',
+        'gemini-flash-latest',
+        'gemini-2.5-pro',
+        'gemini-1.5-flash'
+    ];
+
+    if (requestedModel === 'gemini-3.7-flash') {
+        return ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest', 'gemini-1.5-flash', 'gemini-2.5-pro'];
+    }
+    if (requestedModel === 'gemini-3.1-pro-preview') {
+        return ['gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-flash-latest', 'gemini-2.5-flash'];
+    }
+    if (requestedModel === 'gemini-3.1-flash-lite') {
+        return ['gemini-2.0-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest'];
+    }
+    if (requestedModel.startsWith('gemini-')) {
+        return [requestedModel, ...standardPool.filter(m => m !== requestedModel)];
+    }
+    return standardPool;
+}
+
 async function callModel(
     model: string,
     systemInstruction: string,
@@ -215,26 +251,31 @@ async function callModel(
 
     const runCall = async (targetModel: string) => {
         return await executeWithKeyRotation(async (aiClient) => {
-            return aiClient.models.generateContent({
-                model: targetModel,
-                contents: userPrompt,
-                config: {
-                    systemInstruction: systemInstruction,
-                    ...(config.jsonOutput && { responseMimeType: "application/json" }),
-                    ...(config.responseSchema && { responseSchema: config.responseSchema }),
-                    ...(config.googleSearch && { tools: [{ googleSearch: {} }] }),
-                },
-            });
+            return await withTimeout(
+                aiClient.models.generateContent({
+                    model: targetModel,
+                    contents: userPrompt,
+                    config: {
+                        systemInstruction: systemInstruction,
+                        ...(config.jsonOutput && { responseMimeType: "application/json" }),
+                        ...(config.responseSchema && { responseSchema: config.responseSchema }),
+                        ...(config.googleSearch && { tools: [{ googleSearch: {} }] }),
+                    },
+                }),
+                40000,
+                `Timeout: A chamada ao modelo ${targetModel} excedeu 40 segundos.`
+            );
         }, targetModel);
     };
 
     const runGeminiFallback = async (originalModel: string, lastError: any) => {
-        console.warn(`[Gemini Service] Model ${originalModel} failed or exceeded limits: ${lastError instanceof Error ? lastError.message : String(lastError)}. Falling back to Gemini models to maintain the automation flow.`);
+        console.warn(`[Gemini Service] Model ${originalModel} encountered error: ${lastError instanceof Error ? lastError.message : String(lastError)}. Initiating resilient Gemini fallback cascade...`);
         const fallbackChain = [
-            'gemini-3.7-flash',
+            'gemini-2.5-flash',
+            'gemini-2.0-flash',
             'gemini-flash-latest',
-            'gemini-3.1-flash-lite',
-            'gemini-3.1-pro-preview'
+            'gemini-1.5-flash',
+            'gemini-2.5-pro'
         ];
         let finalError = lastError;
         for (const targetModel of fallbackChain) {
@@ -243,57 +284,30 @@ async function callModel(
                 return await runCall(targetModel);
             } catch (fallbackErr) {
                 finalError = fallbackErr;
-                const errStr = fallbackErr instanceof Error ? fallbackErr.message.toLowerCase() : String(fallbackErr).toLowerCase();
-                const isQuotaExhausted = errStr.includes('exhausted') || errStr.includes('quota') || errStr.includes('limit') || errStr.includes('429');
-                const isOverloaded = errStr.includes('503') || errStr.includes('overloaded') || errStr.includes('unavailable');
-
-                if (isQuotaExhausted || isOverloaded) {
-                    continue; // Try the next fallback model in our cascade list
-                } else {
-                    throw fallbackErr; // Critical non-retryable error, throw immediately
-                }
+                console.warn(`[Gemini Service] Fallback to ${targetModel} also failed: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}. Trying next in cascade...`);
+                continue;
             }
         }
         throw finalError;
     };
 
     if (model.startsWith('gemini-')) {
-        const fallbackChain = [
-            'gemini-3.7-flash',
-            'gemini-flash-latest',
-            'gemini-3.1-flash-lite',
-            'gemini-3.1-pro-preview'
-        ];
-
-        // Create a list of models to try starting with the requested model
-        const modelsToTry: string[] = [model];
-        for (const m of fallbackChain) {
-            if (m !== model) {
-                modelsToTry.push(m);
-            }
-        }
-
+        const candidateModels = getGeminiCandidateModels(model);
         let lastError: any = null;
-        for (const targetModel of modelsToTry) {
+
+        for (const targetModel of candidateModels) {
             try {
-                if (targetModel !== model) {
-                    console.warn(`[Gemini Service] Primary model failed/overloaded. Falling back to ${targetModel} to maintain automation flow.`);
+                if (targetModel !== candidateModels[0]) {
+                    console.warn(`[Gemini Service] Switching to alternate model: ${targetModel}`);
                 }
                 return await runCall(targetModel);
             } catch (error) {
                 lastError = error;
-                const errStr = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-                const isQuotaExhausted = errStr.includes('exhausted') || errStr.includes('quota') || errStr.includes('limit') || errStr.includes('429');
-                const isOverloaded = errStr.includes('503') || errStr.includes('overloaded') || errStr.includes('unavailable');
-
-                if (isQuotaExhausted || isOverloaded) {
-                    continue; // Try the next fallback model in our cascade list
-                } else {
-                    throw error; // Critical non-retryable error, throw immediately
-                }
+                console.warn(`[Gemini Service] Model ${targetModel} failed: ${error instanceof Error ? error.message : String(error)}. Advancing cascade...`);
+                continue;
             }
         }
-        throw lastError;
+        throw lastError || new Error("All Gemini model candidates in the cascade failed.");
 
     } else if (model.startsWith('grok-')) {
         try {
@@ -308,23 +322,27 @@ async function callModel(
             ];
 
             const apiCall = async () => {
-                const response = await fetch('https://api.x.ai/v1/chat/completions', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${apiKey}`
-                    },
-                    body: JSON.stringify({
-                        model: model,
-                        messages: messages,
-                        stream: false,
-                        temperature: 0,
-                    })
-                });
+                const response = await withTimeout(
+                    fetch('https://api.x.ai/v1/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${apiKey}`
+                        },
+                        body: JSON.stringify({
+                            model: model,
+                            messages: messages,
+                            stream: false,
+                            temperature: 0,
+                        })
+                    }),
+                    40000,
+                    "x.ai request timed out."
+                );
 
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(`x.ai API Error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`);
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(`x.ai API Error: ${response.status} - ${(errorData as any).error?.message || 'Unknown error'}`);
                 }
 
                 const data = await response.json();
@@ -367,21 +385,28 @@ async function callModel(
                     ? window.location.origin 
                     : 'https://ai.studio';
 
-                const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${apiKey}`,
-                        'HTTP-Referer': safeReferer,
-                        'X-Title': 'Scientific Paper Generator'
-                    },
-                    body: JSON.stringify({
-                        model: model,
-                        messages: messages,
-                        stream: false,
-                        temperature: 0,
-                    })
-                });
+                const response = await withTimeout(
+                    fetch('https://openrouter.ai/api/v1/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${apiKey}`,
+                            'HTTP-Referer': safeReferer,
+                            'X-Title': 'Scientific Paper Generator'
+                        },
+                        body: JSON.stringify({
+                            model: model,
+                            messages: messages,
+                            reasoning: {
+                                max_tokens: 4096
+                            },
+                            stream: false,
+                            temperature: 0.2,
+                        })
+                    }),
+                    45000,
+                    "OpenRouter request timed out."
+                );
 
                 if (!response.ok) {
                     let errorMsg = `OpenRouter API Error: ${response.status}`;
@@ -433,14 +458,24 @@ export async function generatePaperTitle(topic: string, language: Language, mode
     Language: **${languageName}**.
     Constraint: Return ONLY the title text. No quotes.`;
 
-    const response = await callModel(model, systemInstruction, userPrompt);
-    if (!response.candidates || response.candidates.length === 0) {
-        throw new Error("AI returned no candidates for title. Prompt likely blocked by safety filters.");
+    try {
+        const response = await callModel(model, systemInstruction, userPrompt);
+        if (response.text && response.text.trim()) {
+            return response.text.trim().replace(/"/g, '').replace(/\n+/g, ' ');
+        }
+    } catch (err) {
+        console.warn(`[Title Generator] AI Title failed: ${err instanceof Error ? err.message : String(err)}. Using high-impact deterministic title.`);
     }
-    if (!response.text) {
-         throw new Error("AI returned an empty response text for the title generation.");
+
+    // Unbreakable fallback title if all API connections fail
+    if (language === 'pt') {
+        return `Avanços e Desafios Metodológicos em ${topic}: Uma Abordagem Integrada em ${discipline}`;
+    } else if (language === 'es') {
+        return `Avances y Desafíos Metodológicos en ${topic}: Un Enfoque Integrado en ${discipline}`;
+    } else if (language === 'fr') {
+        return `Avancées et Défis Méthodologiques dans ${topic}: Une Approche Intégrée en ${discipline}`;
     }
-    return response.text.trim().replace(/"/g, '');
+    return `Advances and Methodological Frameworks in ${topic}: An Integrated Perspective in ${discipline}`;
 }
 
 function postProcessLatex(latexCode: string): string {
