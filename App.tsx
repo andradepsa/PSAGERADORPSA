@@ -37,8 +37,6 @@ type PublishedArticle = {
 
 
 
-
-
 // Main App Component
 const App: React.FC = () => {
     // Overall workflow step
@@ -422,16 +420,14 @@ const App: React.FC = () => {
                 setGeneratedTitle(temporaryTitle);
                 stopProgressSimulation();
 
-                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Iniciando geração modularizada (Modelo: ${generationModel})...`);
-                startProgressSimulation(10, 75, 120); // Simulação de progresso adaptada para o processo modularizado sequencial
+                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando a primeira versão (Modelo: ${generationModel})...`);
+                startProgressSimulation(10, 75, 55); // Simulate 10 to 75 in 55s
                 const { paper: initialPaper, sources } = await generateInitialPaper(
                     temporaryTitle, 
                     language, 
                     pageCount, 
                     generationModel, 
-                    authors, // Pass dynamic authors array
-                    (status: string) => setGenerationStatus(`Artigo ${i}/${articlesToProcess}: ${status}`),
-                    selectedDiscipline
+                    authors // Pass dynamic authors array
                 );
                 currentPaper = initialPaper;
                 setPaperSources(sources);

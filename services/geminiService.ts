@@ -141,11 +141,6 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
                  throw new Error(`API Quota Exceeded (Limit: 0) or Model Unavailable: ${errorMessage}`);
             }
 
-            // If model is not found (404/deprecated), don't waste time retrying on same model, fail immediately so fallback cascade triggers
-            if (errorMessage.includes('404') || errorMessage.includes('not found') || errorMessage.includes('no longer available')) {
-                throw error;
-            }
-
             const shouldRotate = isRotationTrigger(error);
 
             if (shouldRotate) {
@@ -172,76 +167,6 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
     throw new Error("API call failed after internal retries.");
 }
 
-let lastExternalCallTime = 0;
-
-async function withExternalRateLimit<T>(apiCall: () => Promise<T>): Promise<T> {
-    const MIN_COOLDOWN = 6000; // 6 seconds spacing (prevents rate limits on free providers)
-    const MAX_RETRIES = 4;
-
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        const now = Date.now();
-        const elapsed = now - lastExternalCallTime;
-        if (elapsed < MIN_COOLDOWN) {
-            const waitTime = MIN_COOLDOWN - elapsed;
-            console.log(`[External Cooldown] Spacing requests. Waiting ${waitTime}ms to avoid 429...`);
-            await delay(waitTime);
-        }
-
-        try {
-            lastExternalCallTime = Date.now();
-            return await apiCall();
-        } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : String(error);
-            const is429 = errorMsg.includes('429') || errorMsg.toLowerCase().includes('too many requests') || errorMsg.toLowerCase().includes('rate limit');
-
-            if (is429 && attempt < MAX_RETRIES) {
-                const backoff = attempt * 12000; // Progressive wait: 12s, 24s, 36s, 48s to clear server windows
-                console.warn(`[External Rate Limit] Received 429 (Attempt ${attempt}/${MAX_RETRIES}). Waiting ${backoff / 1000} seconds to clear rate limit...`);
-                await delay(backoff);
-                continue;
-            }
-            throw error;
-        }
-    }
-    throw new Error("External API call failed after multiple rate limit retries.");
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number = 40000, timeoutErrorMsg: string = "Operação excedeu o tempo limite."): Promise<T> {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const timeoutPromise = new Promise<T>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(timeoutErrorMsg)), timeoutMs);
-    });
-    try {
-        return await Promise.race([promise, timeoutPromise]);
-    } finally {
-        if (timer) clearTimeout(timer);
-    }
-}
-
-function getGeminiCandidateModels(requestedModel: string): string[] {
-    const standardPool = [
-        'gemini-3.7-flash',
-        'gemini-3.6-flash',
-        'gemini-flash-latest',
-        'gemini-3.1-pro-preview',
-        'gemini-3.1-flash-lite'
-    ];
-
-    if (requestedModel === 'gemini-3.7-flash') {
-        return ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-flash-latest', 'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite'];
-    }
-    if (requestedModel === 'gemini-3.1-pro-preview') {
-        return ['gemini-3.1-pro-preview', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
-    }
-    if (requestedModel === 'gemini-3.1-flash-lite') {
-        return ['gemini-3.1-flash-lite', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
-    }
-    if (requestedModel.startsWith('gemini-')) {
-        return [requestedModel, ...standardPool.filter(m => m !== requestedModel)];
-    }
-    return standardPool;
-}
-
 async function callModel(
     model: string,
     systemInstruction: string,
@@ -256,31 +181,26 @@ async function callModel(
 
     const runCall = async (targetModel: string) => {
         return await executeWithKeyRotation(async (aiClient) => {
-            return await withTimeout(
-                aiClient.models.generateContent({
-                    model: targetModel,
-                    contents: userPrompt,
-                    config: {
-                        systemInstruction: systemInstruction,
-                        ...(config.jsonOutput && { responseMimeType: "application/json" }),
-                        ...(config.responseSchema && { responseSchema: config.responseSchema }),
-                        ...(config.googleSearch && { tools: [{ googleSearch: {} }] }),
-                    },
-                }),
-                40000,
-                `Timeout: A chamada ao modelo ${targetModel} excedeu 40 segundos.`
-            );
+            return aiClient.models.generateContent({
+                model: targetModel,
+                contents: userPrompt,
+                config: {
+                    systemInstruction: systemInstruction,
+                    ...(config.jsonOutput && { responseMimeType: "application/json" }),
+                    ...(config.responseSchema && { responseSchema: config.responseSchema }),
+                    ...(config.googleSearch && { tools: [{ googleSearch: {} }] }),
+                },
+            });
         }, targetModel);
     };
 
     const runGeminiFallback = async (originalModel: string, lastError: any) => {
-        console.warn(`[Gemini Service] Model ${originalModel} encountered error: ${lastError instanceof Error ? lastError.message : String(lastError)}. Initiating resilient Gemini fallback cascade...`);
+        console.warn(`[Gemini Service] Model ${originalModel} failed or exceeded limits: ${lastError instanceof Error ? lastError.message : String(lastError)}. Falling back to Gemini models to maintain the automation flow.`);
         const fallbackChain = [
             'gemini-3.7-flash',
-            'gemini-3.6-flash',
             'gemini-flash-latest',
-            'gemini-3.1-pro-preview',
-            'gemini-3.1-flash-lite'
+            'gemini-3.1-flash-lite',
+            'gemini-3.1-pro-preview'
         ];
         let finalError = lastError;
         for (const targetModel of fallbackChain) {
@@ -289,30 +209,57 @@ async function callModel(
                 return await runCall(targetModel);
             } catch (fallbackErr) {
                 finalError = fallbackErr;
-                console.warn(`[Gemini Service] Fallback to ${targetModel} also failed: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}. Trying next in cascade...`);
-                continue;
+                const errStr = fallbackErr instanceof Error ? fallbackErr.message.toLowerCase() : String(fallbackErr).toLowerCase();
+                const isQuotaExhausted = errStr.includes('exhausted') || errStr.includes('quota') || errStr.includes('limit') || errStr.includes('429');
+                const isOverloaded = errStr.includes('503') || errStr.includes('overloaded') || errStr.includes('unavailable');
+
+                if (isQuotaExhausted || isOverloaded) {
+                    continue; // Try the next fallback model in our cascade list
+                } else {
+                    throw fallbackErr; // Critical non-retryable error, throw immediately
+                }
             }
         }
         throw finalError;
     };
 
     if (model.startsWith('gemini-')) {
-        const candidateModels = getGeminiCandidateModels(model);
-        let lastError: any = null;
+        const fallbackChain = [
+            'gemini-3.7-flash',
+            'gemini-flash-latest',
+            'gemini-3.1-flash-lite',
+            'gemini-3.1-pro-preview'
+        ];
 
-        for (const targetModel of candidateModels) {
+        // Create a list of models to try starting with the requested model
+        const modelsToTry: string[] = [model];
+        for (const m of fallbackChain) {
+            if (m !== model) {
+                modelsToTry.push(m);
+            }
+        }
+
+        let lastError: any = null;
+        for (const targetModel of modelsToTry) {
             try {
-                if (targetModel !== candidateModels[0]) {
-                    console.warn(`[Gemini Service] Switching to alternate model: ${targetModel}`);
+                if (targetModel !== model) {
+                    console.warn(`[Gemini Service] Primary model failed/overloaded. Falling back to ${targetModel} to maintain automation flow.`);
                 }
                 return await runCall(targetModel);
             } catch (error) {
                 lastError = error;
-                console.warn(`[Gemini Service] Model ${targetModel} failed: ${error instanceof Error ? error.message : String(error)}. Advancing cascade...`);
-                continue;
+                const errStr = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+                const isQuotaExhausted = errStr.includes('exhausted') || errStr.includes('quota') || errStr.includes('limit') || errStr.includes('429');
+                const isOverloaded = errStr.includes('503') || errStr.includes('overloaded') || errStr.includes('unavailable');
+
+                if (isQuotaExhausted || isOverloaded) {
+                    continue; // Try the next fallback model in our cascade list
+                } else {
+                    throw error; // Critical non-retryable error, throw immediately
+                }
             }
         }
-        throw lastError || new Error("All Gemini model candidates in the cascade failed.");
+        throw lastError;
 
     } else if (model.startsWith('grok-')) {
         try {
@@ -327,27 +274,23 @@ async function callModel(
             ];
 
             const apiCall = async () => {
-                const response = await withTimeout(
-                    fetch('https://api.x.ai/v1/chat/completions', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${apiKey}`
-                        },
-                        body: JSON.stringify({
-                            model: model,
-                            messages: messages,
-                            stream: false,
-                            temperature: 0,
-                        })
-                    }),
-                    40000,
-                    "x.ai request timed out."
-                );
+                const response = await fetch('https://api.x.ai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: model,
+                        messages: messages,
+                        stream: false,
+                        temperature: 0,
+                    })
+                });
 
                 if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({}));
-                    throw new Error(`x.ai API Error: ${response.status} - ${(errorData as any).error?.message || 'Unknown error'}`);
+                    const errorData = await response.json();
+                    throw new Error(`x.ai API Error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`);
                 }
 
                 const data = await response.json();
@@ -369,7 +312,7 @@ async function callModel(
                 return reconstructedResponse as GenerateContentResponse;
             };
 
-            return await withExternalRateLimit(apiCall);
+            return await withRateLimitHandling(apiCall);
         } catch (error) {
             return await runGeminiFallback(model, error);
         }
@@ -390,28 +333,21 @@ async function callModel(
                     ? window.location.origin 
                     : 'https://ai.studio';
 
-                const response = await withTimeout(
-                    fetch('https://openrouter.ai/api/v1/chat/completions', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${apiKey}`,
-                            'HTTP-Referer': safeReferer,
-                            'X-Title': 'Scientific Paper Generator'
-                        },
-                        body: JSON.stringify({
-                            model: model,
-                            messages: messages,
-                            reasoning: {
-                                max_tokens: 4096
-                            },
-                            stream: false,
-                            temperature: 0.2,
-                        })
-                    }),
-                    45000,
-                    "OpenRouter request timed out."
-                );
+                const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`,
+                        'HTTP-Referer': safeReferer,
+                        'X-Title': 'Scientific Paper Generator'
+                    },
+                    body: JSON.stringify({
+                        model: model,
+                        messages: messages,
+                        stream: false,
+                        temperature: 0,
+                    })
+                });
 
                 if (!response.ok) {
                     let errorMsg = `OpenRouter API Error: ${response.status}`;
@@ -446,7 +382,7 @@ async function callModel(
                 return reconstructedResponse as GenerateContentResponse;
             };
 
-            return await withExternalRateLimit(apiCall);
+            return await withRateLimitHandling(apiCall);
         } catch (error) {
             return await runGeminiFallback(model, error);
         }
@@ -463,24 +399,14 @@ export async function generatePaperTitle(topic: string, language: Language, mode
     Language: **${languageName}**.
     Constraint: Return ONLY the title text. No quotes.`;
 
-    try {
-        const response = await callModel(model, systemInstruction, userPrompt);
-        if (response.text && response.text.trim()) {
-            return response.text.trim().replace(/"/g, '').replace(/\n+/g, ' ');
-        }
-    } catch (err) {
-        console.warn(`[Title Generator] AI Title failed: ${err instanceof Error ? err.message : String(err)}. Using high-impact deterministic title.`);
+    const response = await callModel(model, systemInstruction, userPrompt);
+    if (!response.candidates || response.candidates.length === 0) {
+        throw new Error("AI returned no candidates for title. Prompt likely blocked by safety filters.");
     }
-
-    // Unbreakable fallback title if all API connections fail
-    if (language === 'pt') {
-        return `Avanços e Desafios Metodológicos em ${topic}: Uma Abordagem Integrada em ${discipline}`;
-    } else if (language === 'es') {
-        return `Avances y Desafíos Metodológicos en ${topic}: Un Enfoque Integrado en ${discipline}`;
-    } else if (language === 'fr') {
-        return `Avancées et Défis Méthodologiques dans ${topic}: Une Approche Intégrée en ${discipline}`;
+    if (!response.text) {
+         throw new Error("AI returned an empty response text for the title generation.");
     }
-    return `Advances and Methodological Frameworks in ${topic}: An Integrated Perspective in ${discipline}`;
+    return response.text.trim().replace(/"/g, '');
 }
 
 function postProcessLatex(latexCode: string): string {
@@ -592,254 +518,47 @@ async function fetchSemanticScholarPapers(query: string, limit: number = 5): Pro
     }
 }
 
-export async function generateInitialPaper(
-    title: string, 
-    language: Language, 
-    pageCount: number, 
-    model: string, 
-    authorDetails: PersonalData[],
-    onProgress?: (status: string) => void,
-    discipline?: string
-): Promise<{ paper: string, sources: PaperSource[] }> {
+export async function generateInitialPaper(title: string, language: Language, pageCount: number, model: string, authorDetails: PersonalData[]): Promise<{ paper: string, sources: PaperSource[] }> {
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
     const babelLanguage = BABEL_LANG_MAP[language];
     const referenceCount = 10;
     const referencePlaceholders = Array.from({ length: referenceCount }, (_, i) => `[INSERT REFERENCE ${i + 1} HERE]`).join('\n\n');
-    
-    if (onProgress) onProgress("Buscando fontes acadêmicas e referências no Semantic Scholar...");
     const semanticScholarPapers = await fetchSemanticScholarPapers(title, referenceCount);
     const semanticScholarContext = semanticScholarPapers.length > 0
         ? "\n\n**Additional Academic Sources from Semantic Scholar (prioritize these):**\n" +
           semanticScholarPapers.map(p => `- Title: ${p.title}\n  Authors: ${p.authors.map(a => a.name).join(', ')}\n  Abstract: ${p.abstract || 'N/A'}\n  URL: ${p.url}`).join('\n---\n')
         : "";
-
-    const latexAuthorsBlock = authorDetails.map((author) => {
+    const latexAuthorsBlock = authorDetails.map((author, index) => {
         const name = author.name || 'Unknown Author';
         const affiliation = author.affiliation ? `\\\\ ${author.affiliation}` : '';
         const orcid = author.orcid ? `\\\\ \\small ORCID: \\url{https://orcid.org/${author.orcid}}` : '';
         return `${name}${affiliation}${orcid}`;
     }).join(' \\and\n');
     const pdfAuthorNames = authorDetails.map(a => a.name).filter(Boolean).join(', ');
-
-    // 1. Initialize overall paper LaTeX code template
-    let finalPaperCode = ARTICLE_TEMPLATE.replace('% Babel package will be added dynamically based on language', `\\usepackage[${babelLanguage}]{babel}`).replace('[INSERT REFERENCE COUNT]', String(referenceCount)).replace('[INSERT NEW REFERENCE LIST HERE]', referencePlaceholders);
-    finalPaperCode = finalPaperCode.replace('__ALL_AUTHORS_LATEX_BLOCK__', latexAuthorsBlock);
-    finalPaperCode = finalPaperCode.replace('pdfauthor={__PDF_AUTHOR_NAMES_PLACEHOLDER__}', `pdfauthor={${pdfAuthorNames}}`);
-    finalPaperCode = finalPaperCode.replace(/\[INSERT NEW TITLE HERE\]/g, title);
-
-    const discName = discipline || 'Academic Research';
-
-    const cleanSegment = (text: string): string => {
-        if (!text) return '';
-        let cleaned = extractLatexFromResponse(text);
-        cleaned = cleaned.replace(/\\documentclass[\s\S]*?\\begin\{document\}/g, '');
-        cleaned = cleaned.replace(/\\end\{document\}/g, '');
-        cleaned = cleaned.replace(/\\maketitle/g, '');
-        cleaned = cleaned.replace(/\\title\{.*?\}/g, '');
-        cleaned = cleaned.replace(/\\author\{.*?\}/g, '');
-        cleaned = cleaned.replace(/\\date\{.*?\}/g, '');
-        cleaned = cleaned.replace(/\\begin\{abstract\}/g, '');
-        cleaned = cleaned.replace(/\\end\{abstract\}/g, '');
-        return cleaned.trim();
-    };
-
-    // Define segments/sections to write sequentially
-    const segments = [
-        {
-            id: 'abstract',
-            name: language === 'pt' ? 'Resumo & Palavras-chave' : language === 'es' ? 'Resumen & Palabras clave' : 'Abstract & Keywords',
-            placeholder: '[INSERT NEW COMPLETE ABSTRACT HERE. This must be plain text without LaTeX commands.]',
-            keywordsPlaceholder: '[INSERT COMMA-SEPARATED KEYWORDS HERE]',
-            prompt: `Write the Abstract and Keywords for the scientific paper titled "${title}" in the field of ${discName}.
-The abstract must be a single paragraph of dense, rigorous, comprehensive academic summary (approx. 200-250 words) outlining the research context, objective, methodology, key findings, and implications.
-Also provide 4 to 6 comma-separated keywords.
-Provide your response strictly in the following format:
-ABSTRACT:
-<your abstract text here>
-KEYWORDS:
-<your keywords here>`
-        },
-        {
-            id: 'introduction',
-            name: language === 'pt' ? 'Introdução' : language === 'es' ? 'Introducción' : 'Introduction',
-            placeholder: '[INSERT NEW CONTENT FOR INTRODUCTION SECTION HERE. The content must be extensive and detailed to meet the required page count.]',
-            prompt: (context: string) => `Write the complete "Introduction" section for the scientific paper titled "${title}" in the field of ${discName}.
-Context:
-${context}
-
-The introduction must be highly detailed, comprehensive, and academically rigorous (minimum 500-800 words), covering the general background, problem statement, research gap, specific objective of this paper, and the outline of the sections.
-Do NOT write the document preamble or section headers. Write ONLY the paragraph body content. Use standard LaTeX paragraphs separated by double newlines.`
-        },
-        {
-            id: 'literature',
-            name: language === 'pt' ? 'Revisão de Literatura' : language === 'es' ? 'Revisión de Literatura' : 'Literature Review',
-            placeholder: '[INSERT NEW CONTENT FOR LITERATURE REVIEW SECTION HERE. The content must be extensive and detailed to meet the required page count.]',
-            prompt: (context: string) => `Write the complete "Literature Review" section for the scientific paper titled "${title}" in ${discName}.
-Context:
-${context}
-${semanticScholarContext}
-
-Provide a deep, critical review of previous scholarly works, comparing and contrasting different theoretical frameworks and empirical studies, and highlighting the gap this research addresses (minimum 600-900 words).
-Do NOT write the section header. Write ONLY the paragraph body content. Use citations like [1], [2], etc., where appropriate.`
-        },
-        {
-            id: 'methodology',
-            name: language === 'pt' ? 'Metodologia' : language === 'es' ? 'Metodología' : 'Methodology',
-            placeholder: '[INSERT NEW CONTENT FOR METHODOLOGY SECTION HERE. The content must be extensive and detailed to meet the required page count.]',
-            prompt: (context: string) => `Write the complete "Methodology" section for the scientific paper titled "${title}" in ${discName}.
-Context:
-${context}
-
-Describe the research design, data collection procedures, sample characteristics, variables/instruments, and analytical/statistical techniques in precise detail (minimum 500-800 words).
-Do NOT write the section header. Write ONLY the body content. You are highly encouraged to include mathematical equations in LaTeX format, itemized steps, or a beautiful professional flowchart/diagram using native LaTeX TikZ commands to visually represent the methodology.`
-        },
-        {
-            id: 'results',
-            name: language === 'pt' ? 'Resultados' : language === 'es' ? 'Resultados' : 'Results',
-            placeholder: '[INSERT NEW CONTENT FOR RESULTS SECTION HERE. The content must be extensive and detailed to meet the required page count.]',
-            prompt: (context: string) => `Write the complete "Results" section for the scientific paper titled "${title}" in ${discName}.
-Context:
-${context}
-
-Present the empirical findings and analysis of data with high scientific precision (minimum 500-800 words).
-Do NOT write the section header. Write ONLY the body content. You are highly encouraged to include LaTeX tables (e.g. using tabular, with clean academic formatting) or beautiful vector plots/charts using native pgfplots/TikZ commands to illustrate the results.`
-        },
-        {
-            id: 'discussion',
-            name: language === 'pt' ? 'Discussão' : language === 'es' ? 'Discusión' : 'Discussion',
-            placeholder: '[INSERT NEW CONTENT FOR DISCUSSION SECTION HERE. The content must be extensive and detailed to meet the required page count.]',
-            prompt: (context: string) => `Write the complete "Discussion" section for the scientific paper titled "${title}" in ${discName}.
-Context:
-${context}
-
-Interpret the empirical findings, discuss how they support or challenge previous literature, analyze theoretical and practical implications, and clearly address any limitations of the study (minimum 500-800 words).
-Do NOT write the section header. Write ONLY the body content.`
-        },
-        {
-            id: 'conclusion',
-            name: language === 'pt' ? 'Conclusão' : language === 'es' ? 'Conclusión' : 'Conclusion',
-            placeholder: '[INSERT NEW CONTENT FOR CONCLUSION SECTION HERE. The content must be extensive and detailed to meet the required page count.]',
-            prompt: (context: string) => `Write the complete "Conclusion" section for the scientific paper titled "${title}" in ${discName}.
-Context:
-${context}
-
-Summarize the key findings, restate the main contributions, and suggest future avenues for research (approx. 300-500 words).
-Do NOT write the section header. Write ONLY the body content.`
-        },
-        {
-            id: 'references',
-            name: language === 'pt' ? 'Referências Bibliográficas' : language === 'es' ? 'Referencias' : 'References',
-            placeholder: '[INSERT NEW REFERENCE LIST HERE]',
-            prompt: (context: string) => `Generate the complete list of academic references for the paper titled "${title}" in ${discName}.
-The list should contain exactly 10 high-quality, strictly academic citations in standard academic format (APA or IEEE) relevant to the topic.
-Provide the response as plain paragraphs, each starting with \\noindent and ending with \\par.
-CRITICAL: Absolutely DO NOT use \\begin{thebibliography} or \\bibitem. Generate exactly 10 bibliography entries.
-Example:
-\\noindent [1] Author, A. (2025). Title of the article. *Journal Name*, 1(2), 10-20. \\par
-\\noindent [2] Author, B. (2026). Book Title. *Publisher*. \\par`
-        }
-    ];
-
-    let runningContext = `Title: ${title}\nDiscipline: ${discName}`;
-    let gatheredSources: PaperSource[] = [];
-
-    const COOLDOWN_SECONDS = 8; // Confortável espaçamento de 8 segundos entre as chamadas de seções
-
-    for (let i = 0; i < segments.length; i++) {
-        const seg = segments[i];
-
-        if (onProgress) {
-            onProgress(`Escrevendo a seção: ${seg.name}... (Parte ${i + 1} de ${segments.length})`);
-        }
-
-        const systemInstruction = `Act as an expert academic researcher and LaTeX writer.
-Your task is to write the specific section: "${seg.name}" for a scientific paper titled "${title}" in ${discName}.
-Language: Write the entire section content strictly in **${languageName}**.
-LaTeX Rules:
-1. Do NOT write the document preamble, \\documentclass, or \\begin{document}. Just write the text of this section.
-2. Ensure there are NO unescaped ampersands (&) or raw unicode characters (use LaTeX macros instead).
-3. Do NOT use \\includegraphics. If you want to include figures or charts, write them using beautiful native TikZ or pgfplots environments.
-4. Keep the style highly formal, objective, and scholarly.`;
-
-        const userPrompt = typeof seg.prompt === 'function' ? seg.prompt(runningContext) : seg.prompt;
-        
-        let attempts = 0;
-        let responseText = '';
-        let stepSources: PaperSource[] = [];
-
-        while (attempts < 2) {
-            try {
-                const response = await callModel(model, systemInstruction, userPrompt, { googleSearch: true });
-                if (response.text) {
-                    responseText = response.text;
-                    stepSources = response.candidates?.[0]?.groundingMetadata?.groundingChunks?.filter(chunk => chunk.web).map(chunk => ({ uri: chunk.web.uri, title: chunk.web.title, })) || [];
-                    break;
-                }
-            } catch (err) {
-                attempts++;
-                if (attempts >= 2) throw err;
-                if (onProgress) onProgress(`Retentando seção ${seg.name} em 5 segundos devido a erro temporário...`);
-                await delay(5000);
-            }
-        }
-
-        if (!responseText) {
-            throw new Error(`A geração da seção ${seg.name} retornou um texto vazio.`);
-        }
-
-        gatheredSources = [...gatheredSources, ...stepSources];
-
-        if (seg.id === 'abstract') {
-            let abstractText = '';
-            let keywordsText = '';
-            const abstractMatch = responseText.match(/ABSTRACT:\s*([\s\S]*?)(?=KEYWORDS:|$)/i);
-            const keywordsMatch = responseText.match(/KEYWORDS:\s*([\s\S]*?)$/i);
-            
-            if (abstractMatch) {
-                abstractText = abstractMatch[1].trim();
-            } else {
-                abstractText = responseText.replace(/ABSTRACT:/i, '').replace(/KEYWORDS:[\s\S]*$/i, '').trim();
-            }
-            
-            if (keywordsMatch) {
-                keywordsText = keywordsMatch[1].trim();
-            } else {
-                keywordsText = 'scientific paper, academic research, analysis';
-            }
-
-            finalPaperCode = finalPaperCode.replace(seg.placeholder, abstractText);
-            if (seg.keywordsPlaceholder) {
-                finalPaperCode = finalPaperCode.replace(seg.keywordsPlaceholder, keywordsText);
-            }
-            runningContext += `\n\nAbstract: ${abstractText.substring(0, 400)}`;
-        } else {
-            const cleanedBody = cleanSegment(responseText);
-            finalPaperCode = finalPaperCode.replace(seg.placeholder, cleanedBody);
-            runningContext += `\n\n${seg.name}: ${cleanedBody.substring(0, 300)}...`;
-        }
-
-        // Aguardar o cooldown anti-bloqueio entre seções (exceto após a última seção)
-        if (i < segments.length - 1) {
-            for (let sec = COOLDOWN_SECONDS; sec > 0; sec--) {
-                if (onProgress) {
-                    onProgress(`Pausa anti-bloqueio: Aguardando ${sec}s antes de iniciar a seção "${segments[i + 1].name}"...`);
-                }
-                await delay(1000);
-            }
-        }
+    const systemInstruction = `Act as a world-class AI specialized in generating LaTeX scientific papers. Write a complete, rigorous paper based on the title, strictly following the provided LaTeX template.
+    **Rules:**
+    1.  **Use Template:** Fill all placeholders [INSERT...] with relevant content.
+    2.  **References:** Generate ${referenceCount} unique, **strictly academic citations**. NO \\bibitem. NO URLs.
+    3.  **Language:** Write in **${languageName}**.
+    4.  **Format:** Return valid LaTeX. NO ampersands (&) in text. NO CJK characters.
+    5.  **CRITICAL - VISUAL GRAPHICS:** Do NOT use \\includegraphics or load external image files (as they do not exist on the system). Instead, you are highly encouraged to create beautiful, publication-quality vector diagrams, flowcharts, schemas, or mathematical plots using clean, native TikZ or pgfplots inside standard \\begin{figure}[h]...\\end{figure} environments. Always include descriptive \\caption and labels.`;
+    let templateWithBabelAndAuthor = ARTICLE_TEMPLATE.replace('% Babel package will be added dynamically based on language', `\\usepackage[${babelLanguage}]{babel}`).replace('[INSERT REFERENCE COUNT]', String(referenceCount)).replace('[INSERT NEW REFERENCE LIST HERE]', referencePlaceholders);
+    templateWithBabelAndAuthor = templateWithBabelAndAuthor.replace('__ALL_AUTHORS_LATEX_BLOCK__', latexAuthorsBlock);
+    templateWithBabelAndAuthor = templateWithBabelAndAuthor.replace('pdfauthor={__PDF_AUTHOR_NAMES_PLACEHOLDER__}', `pdfauthor={${pdfAuthorNames}}`);
+    const userPrompt = `Title: "${title}".\n${semanticScholarContext}\n**Template:**\n\`\`\`latex\n${templateWithBabelAndAuthor}\n\`\`\`\n`;
+    const response = await callModel(model, systemInstruction, userPrompt, { googleSearch: true });
+    if (!response.candidates || response.candidates.length === 0) {
+        throw new Error("AI returned no candidates. This usually means the model refused the prompt (safety/policy).");
     }
-
-    // Unify all sources gathered along the path, removing duplicates
-    const uniqueSources: PaperSource[] = [];
-    const seenUris = new Set<string>();
-    for (const src of gatheredSources) {
-        if (!seenUris.has(src.uri)) {
-            seenUris.add(src.uri);
-            uniqueSources.push(src);
-        }
+    if (!response.text) {
+        throw new Error(`AI returned an empty text response.`);
     }
-
-    return { paper: postProcessLatex(finalPaperCode), sources: uniqueSources };
+    let paper = extractLatexFromResponse(response.text);
+    if (!paper.includes('\\end{document}')) {
+        paper += '\n\\end{document}';
+    }
+    const sources: PaperSource[] = response.candidates?.[0]?.groundingMetadata?.groundingChunks?.filter(chunk => chunk.web).map(chunk => ({ uri: chunk.web.uri, title: chunk.web.title, })) || [];
+    return { paper: postProcessLatex(paper), sources };
 }
 
 function cleanJsonOutput(text: string): string {
