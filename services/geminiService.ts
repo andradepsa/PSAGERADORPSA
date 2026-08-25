@@ -518,6 +518,92 @@ async function fetchSemanticScholarPapers(query: string, limit: number = 5): Pro
     }
 }
 
+export async function generateCompletePaper(
+    topicOrTitle: string,
+    language: Language,
+    pageCount: number,
+    model: string,
+    authorDetails: PersonalData[],
+    discipline?: string
+): Promise<{ paper: string, title: string, sources: PaperSource[] }> {
+    const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
+    const babelLanguage = BABEL_LANG_MAP[language] || 'english';
+    const referenceCount = 10;
+    
+    // Fetch academic context safely
+    let semanticScholarContext = "";
+    try {
+        const semanticScholarPapers = await fetchSemanticScholarPapers(topicOrTitle, 5);
+        if (semanticScholarPapers && semanticScholarPapers.length > 0) {
+            semanticScholarContext = "\n\n**Academic Reference Grounding from Semantic Scholar:**\n" +
+              semanticScholarPapers.map(p => `- Title: ${p.title}\n  Authors: ${p.authors.map(a => a.name).join(', ')}\n  Abstract: ${p.abstract || 'N/A'}\n  URL: ${p.url}`).join('\n---\n');
+        }
+    } catch (_) {}
+
+    const latexAuthorsBlock = authorDetails.map((author) => {
+        const name = author.name || 'Unknown Author';
+        const affiliation = author.affiliation ? `\\\\ ${author.affiliation}` : '';
+        const orcid = author.orcid ? `\\\\ \\small ORCID: \\url{https://orcid.org/${author.orcid}}` : '';
+        return `${name}${affiliation}${orcid}`;
+    }).join(' \\and\n');
+    const pdfAuthorNames = authorDetails.map(a => a.name).filter(Boolean).join(', ');
+
+    const systemInstruction = `Act as an elite academic researcher and world-class LaTeX author in ${discipline || 'Academic Research'}.
+Generate a COMPLETE, highly rigorous, comprehensive, publication-ready scientific research paper in valid LaTeX in a SINGLE PASS.
+
+**Strict Mandates:**
+1. **Single Complete Output:** Write full, detailed, deep academic content for ALL sections from start to finish. Do NOT use placeholders like [INSERT...].
+2. **Document Structure:**
+   - \\title{...}: Formulate an innovative, precise, high-impact research title based on "${topicOrTitle}".
+   - \\begin{abstract}...\\end{abstract}: Rich, structured scholarly abstract (200-300 words).
+   - \\noindent \\textbf{Keywords:} 4-6 comma-separated academic keywords.
+   - \\section{Introduction}: Thorough background, problem definition, theoretical context, and research contributions.
+   - \\section{Literature Review}: In-depth critical review of contemporary state-of-the-art literature.
+   - \\section{Methodology}: Detailed mathematical, theoretical, or experimental methodology.
+   - \\section{Results}: Comprehensive empirical results with structured tables or native TikZ charts/diagrams.
+   - \\section{Discussion}: Critical interpretation of findings, academic implications, and comparative analysis.
+   - \\section{Conclusion}: Synthesis of findings, practical applications, limitations, and future directions.
+   - \\section{Referências}: Exactly ${referenceCount} complete, realistic, strictly formatted academic references (each as \\noindent ... \\par). NO \\bibitem. NO \\begin{thebibliography}.
+3. **Language:** Write entirely in **${languageName}**.
+4. **LaTeX Compatibility:** Valid LaTeX with \\usepackage[${babelLanguage}]{babel}. NO unescaped ampersands (&), NO raw CJK/Unicode symbols, NO \\includegraphics (use native TikZ or tabular environments for visual graphics).
+5. Must begin with \\documentclass[12pt,a4paper]{article} and end with \\end{document}.`;
+
+    const userPrompt = `Research Theme / Subject: "${topicOrTitle}" in ${discipline || 'Science & Technology'}.
+Language: **${languageName}**.
+Babel Package: \\usepackage[${babelLanguage}]{babel}
+Authors LaTeX Block:
+${latexAuthorsBlock}
+PDF Authors: ${pdfAuthorNames}
+${semanticScholarContext}
+
+Task: Produce the ENTIRE, COMPLETE, publication-ready scientific LaTeX paper now in a SINGLE DIRECT PASS.`;
+
+    const response = await callModel(model, systemInstruction, userPrompt, { googleSearch: true });
+    if (!response.candidates || response.candidates.length === 0) {
+        throw new Error("AI returned no candidates. This usually means the model refused the prompt (safety/policy).");
+    }
+    if (!response.text) {
+        throw new Error(`AI returned an empty text response.`);
+    }
+
+    let paper = extractLatexFromResponse(response.text);
+    if (!paper.includes('\\end{document}')) {
+        paper += '\n\\end{document}';
+    }
+    paper = postProcessLatex(paper);
+
+    // Extract generated title from the LaTeX code
+    const titleMatch = paper.match(/\\title\{([\s\S]*?)\}/);
+    let extractedTitle = topicOrTitle;
+    if (titleMatch && titleMatch[1]) {
+        extractedTitle = titleMatch[1].replace(/\\.*?\{([^}]*)\}/g, '$1').replace(/\\/g, '').replace(/[\n\r]+/g, ' ').trim();
+    }
+
+    const sources: PaperSource[] = response.candidates?.[0]?.groundingMetadata?.groundingChunks?.filter(chunk => chunk.web).map(chunk => ({ uri: chunk.web.uri, title: chunk.web.title })) || [];
+
+    return { paper, title: extractedTitle, sources };
+}
+
 export async function generateInitialPaper(title: string, language: Language, pageCount: number, model: string, authorDetails: PersonalData[]): Promise<{ paper: string, sources: PaperSource[] }> {
     const languageName = LANGUAGES.find(l => l.code === language)?.name || 'English';
     const babelLanguage = BABEL_LANG_MAP[language];

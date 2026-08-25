@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide } from './services/geminiService';
+import { generateCompletePaper, generateInitialPaper, analyzePaper, improvePaper, generatePaperTitle, fixLatexPaper, reformatPaperWithStyleGuide } from './services/geminiService';
 import type { Language, IterationAnalysis, PaperSource, AnalysisResult, StyleGuide, ArticleEntry, PersonalData } from './types';
 import { LANGUAGES, AVAILABLE_MODELS, ANALYSIS_TOPICS, ALL_TOPICS_BY_DISCIPLINE, getAllDisciplines, getRandomTopic, FIX_OPTIONS, STYLE_GUIDES, TOTAL_ITERATIONS, DISCIPLINE_AUTHORS } from './constants';
 
@@ -411,59 +411,36 @@ const App: React.FC = () => {
                 setGeneratedTitle('');
                 setFinalLatexCode('');
 
-                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando um título inovador para ${selectedDiscipline} (Modelo: ${analysisModel})...`);
-                startProgressSimulation(0, 10, 4); // Simulate 0 to 10 in 4s
-                // Use getRandomTopic with selectedDiscipline
+                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando artigo científico completo em etapa única (Modelo: ${generationModel})...`);
+                startProgressSimulation(0, 80, 45); // Smooth continuous simulation from 0% to 80%
+                
                 const randomTopic = getRandomTopic(selectedDiscipline);
-                // Pass selectedDiscipline to the title generator
-                temporaryTitle = await generatePaperTitle(randomTopic, language, analysisModel, selectedDiscipline);
-                setGeneratedTitle(temporaryTitle);
-                stopProgressSimulation();
-
-                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Gerando a primeira versão (Modelo: ${generationModel})...`);
-                startProgressSimulation(10, 75, 55); // Simulate 10 to 75 in 55s
-                const { paper: initialPaper, sources } = await generateInitialPaper(
-                    temporaryTitle, 
-                    language, 
-                    pageCount, 
-                    generationModel, 
-                    authors // Pass dynamic authors array
+                const { paper: completePaper, title: generatedPaperTitle, sources } = await generateCompletePaper(
+                    randomTopic,
+                    language,
+                    pageCount,
+                    generationModel,
+                    authors,
+                    selectedDiscipline
                 );
-                currentPaper = initialPaper;
+                
+                temporaryTitle = generatedPaperTitle;
+                setGeneratedTitle(temporaryTitle);
+                currentPaper = completePaper;
                 setPaperSources(sources);
+                setFinalLatexCode(completePaper);
                 stopProgressSimulation();
-
-                for (let iter = 1; iter <= TOTAL_ITERATIONS; iter++) {
-                    if (isGenerationCancelled.current) throw new Error("Operação cancelada pelo usuário.");
-                    const progressStart = 75 + ((iter - 1) / TOTAL_ITERATIONS) * 15;
-                    const progressEnd = 75 + (iter / TOTAL_ITERATIONS) * 15;
-                    
-                    setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Analisando (iteração ${iter}/${TOTAL_ITERATIONS}) (Modelo: ${analysisModel})...`);
-                    startProgressSimulation(progressStart, progressEnd, 15); // Simulate analysis in 15s
-                    const analysisResult = await analyzePaper(currentPaper, pageCount, analysisModel);
-                    const validAnalysisItems = analysisResult.analysis.filter(res => ANALYSIS_TOPICS.some(topic => topic.num === res.topicNum));
-                    setAnalysisResults(prev => [...prev, { iteration: iter, results: validAnalysisItems.map(res => ({ topic: ANALYSIS_TOPICS.find(t => t.num === res.topicNum)!, score: res.score, scoreClass: getScoreClass(res.score), improvement: res.improvement })) }]);
-                    stopProgressSimulation();
-                    
-                    if (!validAnalysisItems.some(res => res.score < 7.0)) break;
-                    if (iter < TOTAL_ITERATIONS) {
-                        setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Refinando com base no feedback ${iter}... (Modelo: ${generationModel})`);
-                        startProgressSimulation(progressEnd - 3, progressEnd, 20); // Simulate refinement in 20s
-                        currentPaper = await improvePaper(currentPaper, { analysis: validAnalysisItems }, language, generationModel);
-                        stopProgressSimulation();
-                    }
-                }
 
                 if (isGenerationCancelled.current) continue;
 
-                setFinalLatexCode(currentPaper);
-                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Compilando documento LaTeX...`);
-                startProgressSimulation(90, 97, 15); // Simulate compilation in 15s
+                setGenerationStatus(`Artigo ${i}/${articlesToProcess}: Compilando documento LaTeX para PDF...`);
+                startProgressSimulation(80, 95, 12); // Simulate compilation from 80% to 95%
                 let compiledFile: File | null = null;
                 const compilationUpdater = (message: string) => setGenerationStatus(`Artigo ${i}/${articlesToProcess}: ${message}`);
                 const { pdfFile, finalCode } = await robustCompile(currentPaper, compilationUpdater);
                 compiledFile = pdfFile;
                 currentPaper = finalCode;
+                setFinalLatexCode(finalCode);
                 stopProgressSimulation();
 
                 if (isGenerationCancelled.current) continue;
