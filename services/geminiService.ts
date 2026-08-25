@@ -141,6 +141,11 @@ async function withRateLimitHandling<T>(apiCall: () => Promise<T>): Promise<T> {
                  throw new Error(`API Quota Exceeded (Limit: 0) or Model Unavailable: ${errorMessage}`);
             }
 
+            // If model is not found (404/deprecated), don't waste time retrying on same model, fail immediately so fallback cascade triggers
+            if (errorMessage.includes('404') || errorMessage.includes('not found') || errorMessage.includes('no longer available')) {
+                throw error;
+            }
+
             const shouldRotate = isRotationTrigger(error);
 
             if (shouldRotate) {
@@ -215,21 +220,21 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number = 40000, ti
 
 function getGeminiCandidateModels(requestedModel: string): string[] {
     const standardPool = [
-        'gemini-2.5-flash',
-        'gemini-2.0-flash',
+        'gemini-3.7-flash',
+        'gemini-3.6-flash',
         'gemini-flash-latest',
-        'gemini-2.5-pro',
-        'gemini-1.5-flash'
+        'gemini-3.1-pro-preview',
+        'gemini-3.1-flash-lite'
     ];
 
     if (requestedModel === 'gemini-3.7-flash') {
-        return ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest', 'gemini-1.5-flash', 'gemini-2.5-pro'];
+        return ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-flash-latest', 'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite'];
     }
     if (requestedModel === 'gemini-3.1-pro-preview') {
-        return ['gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-flash-latest', 'gemini-2.5-flash'];
+        return ['gemini-3.1-pro-preview', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
     }
     if (requestedModel === 'gemini-3.1-flash-lite') {
-        return ['gemini-2.0-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest'];
+        return ['gemini-3.1-flash-lite', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
     }
     if (requestedModel.startsWith('gemini-')) {
         return [requestedModel, ...standardPool.filter(m => m !== requestedModel)];
@@ -271,11 +276,11 @@ async function callModel(
     const runGeminiFallback = async (originalModel: string, lastError: any) => {
         console.warn(`[Gemini Service] Model ${originalModel} encountered error: ${lastError instanceof Error ? lastError.message : String(lastError)}. Initiating resilient Gemini fallback cascade...`);
         const fallbackChain = [
-            'gemini-2.5-flash',
-            'gemini-2.0-flash',
+            'gemini-3.7-flash',
+            'gemini-3.6-flash',
             'gemini-flash-latest',
-            'gemini-1.5-flash',
-            'gemini-2.5-pro'
+            'gemini-3.1-pro-preview',
+            'gemini-3.1-flash-lite'
         ];
         let finalError = lastError;
         for (const targetModel of fallbackChain) {
